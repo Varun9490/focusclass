@@ -188,6 +188,12 @@ class VideoDisplayWidget(QWidget):
         if self.current_frame and self.connected:
             # Draw video frame
             painter.drawPixmap(self.rect(), self.current_frame)
+            
+            # Show frame info overlay
+            painter.setPen(QColor(255, 255, 255))
+            painter.setFont(QFont("Arial", 10))
+            frame_info = f"Frame: {self.current_frame.width()}x{self.current_frame.height()}"
+            painter.drawText(10, 20, frame_info)
         else:
             # Draw status text
             painter.setPen(QColor(255, 255, 255))
@@ -509,13 +515,19 @@ class StudentMainWindow(QMainWindow):
     async def handle_screen_frame(self, client_id: str, data: Dict[str, Any]):
         """Handle incoming screen frame (base64-encoded PNG/JPEG) and display it"""
         try:
-            frame_b64 = data.get("frame") or data.get("image")
+            frame_b64 = data.get("frame") or data.get("image") or data.get("frame_data")
             if not frame_b64:
                 self.logger.warning("Screen frame received with no data")
                 return
             
             import base64
             from PyQt5.QtGui import QPixmap
+            
+            # Debug log frame info
+            frame_size = data.get("width", "unknown")
+            frame_height = data.get("height", "unknown")
+            frame_format = data.get("format", "unknown")
+            self.logger.debug(f"Received frame: {frame_size}x{frame_height}, format: {frame_format}")
             
             # Some implementations send frame as bytes, some as base64 string
             if isinstance(frame_b64, (bytes, bytearray)):
@@ -528,11 +540,17 @@ class StudentMainWindow(QMainWindow):
                 # Scale pixmap to fit widget while preserving aspect ratio
                 scaled = pixmap.scaled(self.video_display.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
                 self.video_display.set_frame(scaled)
+                self.logger.debug(f"Frame displayed successfully: {scaled.width()}x{scaled.height()}")
             else:
                 self.logger.error("Failed to load pixmap from incoming frame data")
+                # Try to save raw data for debugging
+                with open("debug_frame.bin", "wb") as f:
+                    f.write(raw[:1000])  # Save first 1000 bytes for inspection
         
         except Exception as e:
             self.logger.error(f"Error handling screen_frame: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
     
     def init_keystroke_monitoring(self):
         """Initialize keystroke monitoring"""

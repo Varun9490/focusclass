@@ -228,9 +228,9 @@ class TeacherMainWindow(QMainWindow):
             self.basic_sharing_timer = QTimer()
             self.basic_sharing_timer.timeout.connect(self.capture_and_send_frame)
         
-        # Send frames every 1 second for better performance  
-        self.basic_sharing_timer.start(1000)
-        self.logger.info("Basic screen sharing timer started (1fps)")
+        # Send frames every 500ms for smoother sharing (2fps)
+        self.basic_sharing_timer.start(500)
+        self.logger.info("Basic screen sharing timer started (2fps)")
     
     def stop_basic_screen_sharing_timer(self):
         """Stop basic screen sharing timer"""
@@ -252,6 +252,8 @@ class TeacherMainWindow(QMainWindow):
             
             with mss.mss() as sct:
                 # Get monitor based on selected index (use monitor 1 for primary, or the selected monitor)
+                # Default to monitor 1 (primary monitor) if no monitor selected
+                monitor_index = getattr(self, 'selected_monitor_index', 0)
                 monitor = sct.monitors[monitor_index + 1] if monitor_index + 1 < len(sct.monitors) else sct.monitors[1]
                 
                 # Capture screen
@@ -1267,8 +1269,15 @@ Share this information with students to join the session."""
                 self.show_toast("⚠️ Screen sharing already active", "warning")
                 return
             
-            # Start screen capture with selected options
-            success = self.screen_capture.start_capture(monitor_index, quality)
+            # Store selected monitor index for use in frame capture
+            self.selected_monitor_index = monitor_index
+            self.selected_quality = quality
+            
+            # Set quality before starting capture
+            self.screen_capture.set_quality(quality)
+            
+            # Start screen capture with selected monitor
+            success = self.screen_capture.start_capture(monitor_index)
             
             if success:
                 # Notify students about screen sharing start
