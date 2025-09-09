@@ -189,12 +189,15 @@ class WelcomeWindow(QMainWindow):
     def setup_ui(self):
         """Setup the enhanced modern UI with material design"""
         self.setWindowTitle(f"{APP_NAME} v{APP_VERSION} - Professional Edition")
-        # Use proper window sizing for better visibility
-        self.setMinimumSize(800, 700)
-        self.resize(1000, 800)
-        self.setWindowFlags(Qt.Window | Qt.WindowCloseButtonHint)
         
-        # Center the window
+        # Make window fullscreen with option to restore
+        self.setWindowState(Qt.WindowMaximized)
+        self.setMinimumSize(1024, 768)
+        
+        # Add fullscreen toggle
+        self.is_fullscreen = False
+        
+        # Center the window initially (before maximizing)
         self.center_window()
         
         # Modern material design styling
@@ -379,10 +382,12 @@ class WelcomeWindow(QMainWindow):
         footer_layout.setSpacing(20)
         
         # Quick access buttons with modern styling
+        fullscreen_btn = self.create_footer_button("📺", "Toggle Fullscreen", "#28a745", self.toggle_fullscreen)
         settings_btn = self.create_footer_button("⚙️", "Settings", "#6c757d", self.show_settings)
         help_btn = self.create_footer_button("❓", "Help", "#17a2b8", self.show_help)
         about_btn = self.create_footer_button("ℹ️", "About", "#9B59B6", self.show_about)
         
+        footer_layout.addWidget(fullscreen_btn)
         footer_layout.addWidget(settings_btn)
         footer_layout.addStretch()
         
@@ -457,6 +462,20 @@ class WelcomeWindow(QMainWindow):
         button.clicked.connect(callback)
         return button
 
+    def toggle_fullscreen(self):
+        """Toggle between fullscreen and windowed mode"""
+        try:
+            if self.is_fullscreen:
+                self.showNormal()
+                self.setWindowState(Qt.WindowMaximized)
+                self.is_fullscreen = False
+            else:
+                self.showFullScreen()
+                self.is_fullscreen = True
+                
+        except Exception as e:
+            print(f"Error toggling fullscreen: {e}")
+    
     def show_about(self):
         """Show about dialog"""
         about_text = f"""

@@ -120,6 +120,25 @@ class NetworkManager:
         except Exception:
             return "127.0.0.1"
     
+    def get_client_ip(self, client_id: str) -> str:
+        """Get IP address of connected client"""
+        connection_info = self.connections.get(client_id)
+        if isinstance(connection_info, dict):
+            return connection_info.get('ip_address', 'unknown')
+        return 'unknown'
+    
+    def get_client_info(self, client_id: str) -> dict:
+        """Get detailed information about connected client"""
+        connection_info = self.connections.get(client_id)
+        if isinstance(connection_info, dict):
+            return {
+                'client_id': client_id,
+                'ip_address': connection_info.get('ip_address', 'unknown'),
+                'connected_at': connection_info.get('connected_at', 0),
+                'connected_duration': time.time() - connection_info.get('connected_at', 0)
+            }
+        return {'client_id': client_id, 'ip_address': 'unknown', 'connected_at': 0, 'connected_duration': 0}
+    
     # Teacher Server Methods
     async def start_teacher_server(self, session_code: str, password: str) -> Dict[str, Any]:
         """
@@ -165,15 +184,35 @@ class NetworkManager:
         """Start WebSocket server for real-time communication"""
         async def handle_websocket(websocket, path):
             client_id = str(uuid.uuid4())
-            self.connections[client_id] = websocket
+            
+            # Get real client IP address
+            try:
+                # Extract client IP from websocket remote address
+                if hasattr(websocket, 'remote_address'):
+                    client_ip = websocket.remote_address[0]
+                elif hasattr(websocket, 'transport') and hasattr(websocket.transport, 'get_extra_info'):
+                    peername = websocket.transport.get_extra_info('peername')
+                    client_ip = peername[0] if peername else "unknown"
+                else:
+                    client_ip = "unknown"
+            except Exception as e:
+                self.logger.warning(f"Could not get client IP: {e}")
+                client_ip = "unknown"
+            
+            self.connections[client_id] = {
+                'websocket': websocket,
+                'ip_address': client_ip,
+                'connected_at': time.time()
+            }
             
             try:
-                self.logger.info(f"New WebSocket connection: {client_id}")
+                self.logger.info(f"New WebSocket connection: {client_id} from {client_ip}")
                 
                 # Send welcome message
                 await self._send_message(client_id, "welcome", {
                     "client_id": client_id,
-                    "session_code": self.session_code
+                    "session_code": self.session_code,
+                    "server_time": time.time()
                 })
                 
                 # Handle connection event
@@ -190,7 +229,7 @@ class NetworkManager:
                         self.logger.error(f"Error handling message from {client_id}: {e}")
             
             except websockets.exceptions.ConnectionClosed:
-                self.logger.info(f"WebSocket connection closed: {client_id}")
+                self.logger.info(f"WebSocket connection closed: {client_id} ({client_ip})")
             except Exception as e:
                 self.logger.error(f"WebSocket error for {client_id}: {e}")
             finally:
@@ -581,11 +620,15 @@ class NetworkManager:
         try:
             if self.is_teacher:
                 # Teacher sending to student
-                websocket = self.connections.get(client_id)
-                if websocket:
-                    await websocket.send(json.dumps(message))
+                connection_info = self.connections.get(client_id)
+                if connection_info:
+                    websocket = connection_info.get('websocket') if isinstance(connection_info, dict) else connection_info
+                    if websocket:
+                        await websocket.send(json.dumps(message))
+                    else:
+                        self.logger.warning(f"No WebSocket for {client_id}")
                 else:
-                    self.logger.warning(f"No WebSocket connection for {client_id}")
+                    self.logger.warning(f"No connection info for {client_id}")
             else:
                 # Student sending to teacher
                 if self.websocket_client:
@@ -610,10 +653,14 @@ class NetworkManager:
         
         disconnected_clients = []
         
-        for client_id, websocket in self.connections.items():
+        for client_id, connection_info in self.connections.items():
             if client_id not in exclude:
                 try:
-                    await websocket.send(json.dumps(message))
+                    websocket = connection_info.get('websocket') if isinstance(connection_info, dict) else connection_info
+                    if websocket:
+                        await websocket.send(json.dumps(message))
+                    else:
+                        disconnected_clients.append(client_id)
                 except Exception as e:
                     self.logger.error(f"Error broadcasting to {client_id}: {e}")
                     disconnected_clients.append(client_id)

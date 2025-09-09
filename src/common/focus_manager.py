@@ -196,8 +196,310 @@ class FocusManager:
         except Exception as e:
             self.logger.error(f"Error removing keyboard hook: {e}")
     
-    async def _install_window_hook(self):
-        """Install window event hook"""
+    def _check_restricted_keys(self) -> bool:
+        """Check if any restricted key combination is pressed"""
+        try:
+            # Check for Alt+Tab
+            if (win32con.VK_MENU in self.pressed_keys and 
+                win32con.VK_TAB in self.pressed_keys):
+                return True
+            
+            # Check for Windows key combinations
+            if (win32con.VK_LWIN in self.pressed_keys or 
+                win32con.VK_RWIN in self.pressed_keys):
+                return True
+            
+            # Check for Ctrl+Esc (Start menu)
+            if (win32con.VK_CONTROL in self.pressed_keys and 
+                win32con.VK_ESCAPE in self.pressed_keys):
+                return True
+            
+            # Check for Ctrl+Shift+Esc (Task Manager)
+            if (win32con.VK_CONTROL in self.pressed_keys and 
+                win32con.VK_SHIFT in self.pressed_keys and 
+                win32con.VK_ESCAPE in self.pressed_keys):
+                return True
+            
+            # Check for Alt+F4
+            if (win32con.VK_MENU in self.pressed_keys and 
+                win32con.VK_F4 in self.pressed_keys):
+                return True
+            
+            # Check for F11 (fullscreen toggle)
+            if win32con.VK_F11 in self.pressed_keys:
+                return True
+            
+            # Check for Ctrl+N (new window)
+            if (win32con.VK_CONTROL in self.pressed_keys and 
+                ord('N') in self.pressed_keys):
+                return True
+            
+            # Check for Ctrl+T (new tab)
+            if (win32con.VK_CONTROL in self.pressed_keys and 
+                ord('T') in self.pressed_keys):
+                return True
+            
+            # Check for Ctrl+W (close tab)
+            if (win32con.VK_CONTROL in self.pressed_keys and 
+                ord('W') in self.pressed_keys):
+                return True
+            
+            return False
+            
+        except Exception as e:
+            self.logger.error(f"Error checking restricted keys: {e}")
+            return False
+    
+    def _log_violation(self, violation_type: str, description: str):
+        """Log a focus mode violation"""
+        try:
+            current_time = time.time()
+            
+            # Prevent spam violations (limit to one per 2 seconds)
+            if current_time - self.last_violation_time < 2.0:
+                return
+            
+            self.last_violation_time = current_time
+            self.violation_count += 1
+            
+            violation_data = {
+                "type": violation_type,
+                "description": description,
+                "timestamp": current_time,
+                "violation_count": self.violation_count
+            }
+            
+            self.logger.warning(f"Focus violation: {violation_type} - {description}")
+            
+            # Call violation callback
+            if self.violation_callback:
+                asyncio.create_task(self.violation_callback(violation_data))
+                
+        except Exception as e:
+            self.logger.error(f"Error logging violation: {e}")
+    
+    def _start_monitoring(self):
+        """Start the monitoring thread"""
+        try:
+            self.stop_monitoring.clear()
+            self.monitoring_thread = threading.Thread(
+                target=self._monitor_windows,
+                daemon=True
+            )
+            self.monitoring_thread.start()
+            self.logger.info("Window monitoring started")
+            
+        except Exception as e:
+            self.logger.error(f"Error starting monitoring: {e}")
+    
+    def _stop_monitoring(self):
+        """Stop the monitoring thread"""
+        try:
+            self.stop_monitoring.set()
+            if self.monitoring_thread and self.monitoring_thread.is_alive():
+                self.monitoring_thread.join(timeout=2.0)
+            self.logger.info("Window monitoring stopped")
+            
+        except Exception as e:
+            self.logger.error(f"Error stopping monitoring: {e}")
+    
+    def _monitor_windows(self):
+        """Monitor active windows for violations"""
+        try:
+            while not self.stop_monitoring.is_set():
+                try:
+                    # Get the current foreground window
+                    hwnd = win32gui.GetForegroundWindow()
+                    window_title = win32gui.GetWindowText(hwnd)
+                    
+                    # Check if the current window is allowed
+                    if window_title and not self._is_window_allowed(window_title):
+                        # Try to bring allowed window to front
+                        allowed_hwnd = self._find_allowed_window()
+                        if allowed_hwnd:
+                            win32gui.SetForegroundWindow(allowed_hwnd)
+                            win32gui.ShowWindow(allowed_hwnd, win32con.SW_RESTORE)
+                        
+                        self._log_violation("window_switch", f"Attempted to switch to: {window_title}")
+                    
+                    # Check for new browser tabs or windows
+                    self._check_browser_violations()
+                    
+                    # Sleep briefly to avoid excessive CPU usage
+                    time.sleep(0.5)
+                    
+                except Exception as e:
+                    self.logger.error(f"Error in window monitoring loop: {e}")
+                    time.sleep(1.0)
+        
+        except Exception as e:
+            self.logger.error(f"Error in window monitoring: {e}")
+    
+    def _is_window_allowed(self, window_title: str) -> bool:
+        """Check if a window title is in the allowed list"""
+        for allowed in self.allowed_windows:
+            if allowed.lower() in window_title.lower():
+                return True
+        return False
+    
+    def _find_allowed_window(self) -> Optional[int]:
+        """Find an allowed window handle"""
+        try:
+            def enum_window_callback(hwnd, allowed_handles):
+                window_title = win32gui.GetWindowText(hwnd)
+                if window_title and self._is_window_allowed(window_title):
+                    if win32gui.IsWindowVisible(hwnd):
+                        allowed_handles.append(hwnd)
+                return True
+            
+            allowed_handles = []
+            win32gui.EnumWindows(enum_window_callback, allowed_handles)
+            
+            return allowed_handles[0] if allowed_handles else None
+            
+        except Exception as e:
+            self.logger.error(f"Error finding allowed window: {e}")
+            return None
+    
+    def _check_browser_violations(self):
+        """Check for browser-based violations (new tabs, etc.)"""
+        try:
+            # Get all running processes
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                try:
+                    proc_name = proc.info['name'].lower()
+                    
+                    # Check for browsers
+                    if any(browser in proc_name for browser in 
+                           ['chrome', 'firefox', 'edge', 'opera', 'safari', 'brave']):
+                        
+                        # Check command line for multiple tabs/windows
+                        cmdline = proc.info.get('cmdline', [])
+                        if cmdline and len(cmdline) > 5:  # Likely multiple tabs
+                            # Count chrome processes (each tab is a process in Chrome)
+                            chrome_count = sum(1 for p in psutil.process_iter(['name']) 
+                                              if 'chrome' in p.info['name'].lower())
+                            
+                            if chrome_count > 3:  # More than typical for single tab
+                                self._log_violation("browser_tabs", 
+                                                   f"Multiple browser tabs/windows detected ({chrome_count} processes)")
+                        
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+                    
+    async def _disable_task_switching(self):
+        """Disable task switching via registry and other methods"""
+        try:
+            # Disable Task Manager via registry
+            try:
+                key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, 
+                                    "Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System", 
+                                    0, winreg.KEY_SET_VALUE)
+                winreg.SetValueEx(key, "DisableTaskMgr", 0, winreg.REG_DWORD, 1)
+                winreg.CloseKey(key)
+                self.original_settings["DisableTaskMgr"] = True
+                self.logger.info("Task Manager disabled")
+            except Exception as e:
+                self.logger.warning(f"Could not disable Task Manager: {e}")
+            
+            # Disable Registry Editor via registry
+            try:
+                key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                                    "Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System",
+                                    0, winreg.KEY_SET_VALUE)
+                winreg.SetValueEx(key, "DisableRegistryTools", 0, winreg.REG_DWORD, 1)
+                winreg.CloseKey(key)
+                self.original_settings["DisableRegistryTools"] = True
+                self.logger.info("Registry Editor disabled")
+            except Exception as e:
+                self.logger.warning(f"Could not disable Registry Editor: {e}")
+            
+            # Disable Command Prompt
+            try:
+                key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                                    "Software\\Policies\\Microsoft\\Windows\\System",
+                                    0, winreg.KEY_SET_VALUE)
+                winreg.SetValueEx(key, "DisableCMD", 0, winreg.REG_DWORD, 1)
+                winreg.CloseKey(key)
+                self.original_settings["DisableCMD"] = True
+                self.logger.info("Command Prompt disabled")
+            except Exception as e:
+                self.logger.warning(f"Could not disable Command Prompt: {e}")
+            
+        except Exception as e:
+            self.logger.error(f"Error disabling task switching: {e}")
+    
+    async def _enable_focus_assist(self):
+        """Enable Windows Focus Assist"""
+        try:
+            # Use Windows Focus Assist API if available
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                                "Software\\Microsoft\\Windows\\CurrentVersion\\CloudStore\\Store\\Cache\\DefaultAccount",
+                                0, winreg.KEY_SET_VALUE)
+            # Enable Focus Assist in Priority mode
+            winreg.SetValueEx(key, "QuietMode", 0, winreg.REG_DWORD, 1)
+            winreg.CloseKey(key)
+            self.logger.info("Focus Assist enabled")
+            
+        except Exception as e:
+            self.logger.warning(f"Could not enable Focus Assist: {e}")
+    
+    async def _disable_focus_assist(self):
+        """Disable Windows Focus Assist"""
+        try:
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                                "Software\\Microsoft\\Windows\\CurrentVersion\\CloudStore\\Store\\Cache\\DefaultAccount",
+                                0, winreg.KEY_SET_VALUE)
+            winreg.SetValueEx(key, "QuietMode", 0, winreg.REG_DWORD, 0)
+            winreg.CloseKey(key)
+            self.logger.info("Focus Assist disabled")
+            
+        except Exception as e:
+            self.logger.warning(f"Could not disable Focus Assist: {e}")
+    
+    async def _restore_windows_settings(self):
+        """Restore original Windows settings"""
+        try:
+            # Restore Task Manager
+            if self.original_settings.get("DisableTaskMgr"):
+                try:
+                    key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                                        "Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System",
+                                        0, winreg.KEY_SET_VALUE)
+                    winreg.DeleteValue(key, "DisableTaskMgr")
+                    winreg.CloseKey(key)
+                    self.logger.info("Task Manager restored")
+                except Exception as e:
+                    self.logger.warning(f"Could not restore Task Manager: {e}")
+            
+            # Restore Registry Editor
+            if self.original_settings.get("DisableRegistryTools"):
+                try:
+                    key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                                        "Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System",
+                                        0, winreg.KEY_SET_VALUE)
+                    winreg.DeleteValue(key, "DisableRegistryTools")
+                    winreg.CloseKey(key)
+                    self.logger.info("Registry Editor restored")
+                except Exception as e:
+                    self.logger.warning(f"Could not restore Registry Editor: {e}")
+            
+            # Restore Command Prompt
+            if self.original_settings.get("DisableCMD"):
+                try:
+                    key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                                        "Software\\Policies\\Microsoft\\Windows\\System",
+                                        0, winreg.KEY_SET_VALUE)
+                    winreg.DeleteValue(key, "DisableCMD")
+                    winreg.CloseKey(key)
+                    self.logger.info("Command Prompt restored")
+                except Exception as e:
+                    self.logger.warning(f"Could not restore Command Prompt: {e}")
+            
+            self.original_settings.clear()
+            
+        except Exception as e:
+            self.logger.error(f"Error restoring Windows settings: {e}")
         try:
             def window_hook_proc(hWinEventHook, event, hwnd, idObject, idChild, dwEventThread, dwmsEventTime):
                 if event == win32con.EVENT_SYSTEM_FOREGROUND:

@@ -80,7 +80,7 @@ class TeacherMainWindow(QMainWindow):
         # Setup UI
         self.setup_ui()
         self.setup_timers()
-        self.setup_signals()
+        self.setup_network_handlers()
         
         # Toast notification list
         self.active_toasts = []
@@ -223,9 +223,9 @@ class TeacherMainWindow(QMainWindow):
             self.basic_sharing_timer = QTimer()
             self.basic_sharing_timer.timeout.connect(self.capture_and_send_frame)
         
-        # Send frames every 2 seconds for basic mode
-        self.basic_sharing_timer.start(2000)
-        self.logger.info("Basic screen sharing timer started")
+        # Send frames every 1 second for better performance  
+        self.basic_sharing_timer.start(1000)
+        self.logger.info("Basic screen sharing timer started (1fps)")
     
     def stop_basic_screen_sharing_timer(self):
         """Stop basic screen sharing timer"""
@@ -236,21 +236,239 @@ class TeacherMainWindow(QMainWindow):
     def capture_and_send_frame(self):
         """Capture and send frame for basic screen sharing"""
         try:
-            frame_data = self.screen_capture.capture_frame_data()
-            if frame_data:
+            if not self.screen_sharing_active:
+                return
+                
+            # Capture screenshot using MSS directly for better performance
+            import mss
+            import base64
+            import io
+            from PIL import Image
+            
+            with mss.mss() as sct:
+                # Get primary monitor (monitor 1 in MSS, 0 is all monitors)
+                monitor = sct.monitors[1]
+                
+                # Capture screen
+                screenshot = sct.grab(monitor)
+                
+                # Convert to PIL Image and resize for better transmission
+                img = Image.frombytes("RGB", screenshot.size, screenshot.bgra, "raw", "BGRX")
+                
+                # Resize to reduce bandwidth (scale to 75% for medium quality)
+                new_width = int(img.width * 0.75)
+                new_height = int(img.height * 0.75)
+                img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                
+                # Convert to JPEG bytes
+                buffer = io.BytesIO()
+                img.save(buffer, format="JPEG", quality=70, optimize=True)
+                frame_data = buffer.getvalue()
+                
                 # Convert to base64 for transmission
-                import base64
                 frame_b64 = base64.b64encode(frame_data).decode('utf-8')
                 
                 # Send to all connected students
                 self.schedule_async_task(self.network_manager.broadcast_message("screen_frame", {
-                    "frame_data": frame_b64,
+                    "frame": frame_b64,
                     "timestamp": time.time(),
-                    "format": "jpeg"
+                    "format": "jpeg",
+                    "width": new_width,
+                    "height": new_height
                 }))
+                
+                # Update UI with frame info
+                frame_size_kb = len(frame_data) / 1024
+                self.logger.debug(f"Sent frame: {new_width}x{new_height}, {frame_size_kb:.1f}KB")
                 
         except Exception as e:
             self.logger.error(f"Error capturing and sending frame: {e}")
+            # Don't stop sharing on single frame error, just log it
+    
+    def setup_network_handlers(self):
+        """Setup network message and connection handlers"""
+        # Register message handlers
+        self.network_manager.register_message_handler("authenticate", self.handle_student_authentication)
+        self.network_manager.register_message_handler("violation", self.handle_violation)
+        self.network_manager.register_message_handler("heartbeat", self.handle_heartbeat)
+        self.network_manager.register_message_handler("keystroke_data", self.handle_keystroke_data)
+        self.network_manager.register_message_handler("battery_status", self.handle_battery_status)
+        self.network_manager.register_message_handler("system_info", self.handle_system_info)
+        self.network_manager.register_message_handler("malicious_activity", self.handle_malicious_activity)
+        
+        # Register connection handlers
+        self.network_manager.register_connection_handler("connection", self.handle_student_connection)
+        self.network_manager.register_connection_handler("disconnection", self.handle_student_disconnection)
+    
+    async def handle_student_authentication(self, client_id: str, data: Dict[str, Any]):
+        """Handle student authentication"""
+        try:
+            student_name = data.get("student_name")
+            password = data.get("password")
+            session_code = data.get("session_code")
+            
+            self.logger.info(f"Authentication attempt from {client_id}: {student_name}")
+            
+            # Get client IP address
+            client_ip = self.network_manager.get_client_ip(client_id)
+            
+            # Add to database
+            if self.session_id:
+                student_id = await self.db_manager.add_student(
+                    self.session_id, student_name, client_ip
+                )
+            
+            # Add to connected students with real IP
+            self.connected_students[client_id] = {
+                "name": student_name,
+                "ip_address": client_ip,
+                "connected_at": time.time(),
+                "violations": 0,
+                "keystrokes": 0,
+                "battery_level": 100,
+                "is_charging": True,
+                "focus_mode": False,
+                "status": "connected"
+            }
+            
+            # Update UI
+            self.refresh_student_list()
+            self.students_label.setText(f"Students: {len(self.connected_students)}")
+            
+            self.show_toast(f"✅ {student_name} connected from {client_ip}", "success")
+            self.logger.info(f"Student authenticated: {student_name} ({client_ip})")
+                
+        except Exception as e:
+            self.logger.error(f"Error in student authentication: {e}")
+            
+    async def handle_student_connection(self, client_id: str, websocket):
+        """Handle new student connection"""
+        try:
+            client_ip = self.network_manager.get_client_ip(client_id)
+            self.logger.info(f"New student connection: {client_id} from {client_ip}")
+            
+        except Exception as e:
+            self.logger.error(f"Error handling student connection: {e}")
+            
+    async def handle_student_disconnection(self, client_id: str):
+        """Handle student disconnection"""
+        try:
+            if client_id in self.connected_students:
+                student_info = self.connected_students[client_id]
+                student_name = student_info.get("name", "Unknown")
+                student_ip = student_info.get("ip_address", "unknown")
+                
+                # Remove from connected students
+                del self.connected_students[client_id]
+                
+                # Update UI
+                self.refresh_student_list()
+                self.students_label.setText(f"Students: {len(self.connected_students)}")
+                
+                # Log to violation log
+                disconnect_time = time.strftime("%H:%M:%S")
+                self.violation_log.append(f"[{disconnect_time}] 🔌 {student_name} ({student_ip}) disconnected")
+                
+                # Show notification
+                self.show_toast(f"⚠️ {student_name} disconnected from {student_ip}", "warning")
+                self.logger.info(f"Student disconnected: {student_name} ({student_ip})")
+                
+        except Exception as e:
+            self.logger.error(f"Error handling student disconnection: {e}")
+    
+    async def handle_violation(self, client_id: str, data: Dict[str, Any]):
+        """Handle focus mode violation"""
+        try:
+            if client_id in self.connected_students:
+                student_info = self.connected_students[client_id]
+                student_name = student_info.get("name", "Unknown")
+                violation_type = data.get("type", "unknown")
+                
+                # Increment violation count
+                student_info["violations"] = student_info.get("violations", 0) + 1
+                
+                # Log violation
+                violation_time = time.strftime("%H:%M:%S")
+                self.violation_log.append(f"[{violation_time}] ⚠️ {student_name}: {violation_type}")
+                
+                # Update UI
+                self.refresh_student_list()
+                
+                self.logger.warning(f"Violation from {student_name}: {violation_type}")
+                
+        except Exception as e:
+            self.logger.error(f"Error handling violation: {e}")
+    
+    async def handle_heartbeat(self, client_id: str, data: Dict[str, Any]):
+        """Handle student heartbeat"""
+        try:
+            if client_id in self.connected_students:
+                self.connected_students[client_id]["last_heartbeat"] = time.time()
+                
+        except Exception as e:
+            self.logger.error(f"Error handling heartbeat: {e}")
+    
+    async def handle_keystroke_data(self, client_id: str, data: Dict[str, Any]):
+        """Handle keystroke monitoring data"""
+        try:
+            if client_id in self.connected_students:
+                keystroke_count = data.get("count", 0)
+                self.connected_students[client_id]["keystrokes"] = keystroke_count
+                self.refresh_student_list()
+                
+        except Exception as e:
+            self.logger.error(f"Error handling keystroke data: {e}")
+    
+    async def handle_battery_status(self, client_id: str, data: Dict[str, Any]):
+        """Handle battery status update"""
+        try:
+            if client_id in self.connected_students:
+                battery_level = data.get("level", 100)
+                is_charging = data.get("charging", True)
+                
+                self.connected_students[client_id]["battery_level"] = battery_level
+                self.connected_students[client_id]["is_charging"] = is_charging
+                
+                self.refresh_student_list()
+                
+        except Exception as e:
+            self.logger.error(f"Error handling battery status: {e}")
+    
+    async def handle_system_info(self, client_id: str, data: Dict[str, Any]):
+        """Handle system information update"""
+        try:
+            if client_id in self.connected_students:
+                cpu_usage = data.get("cpu_usage", 0)
+                memory_usage = data.get("memory_usage", 0)
+                
+                self.connected_students[client_id]["cpu_usage"] = cpu_usage
+                self.connected_students[client_id]["memory_usage"] = memory_usage
+                
+        except Exception as e:
+            self.logger.error(f"Error handling system info: {e}")
+    
+    async def handle_malicious_activity(self, client_id: str, data: Dict[str, Any]):
+        """Handle malicious activity report"""
+        try:
+            if client_id in self.connected_students:
+                student_name = self.connected_students[client_id].get("name", "Unknown")
+                activity_type = data.get("type", "unknown")
+                description = data.get("description", "")
+                severity = data.get("severity", "low")
+                
+                # Log to malicious activities
+                activity_time = time.strftime("%H:%M:%S")
+                self.malicious_list.append(f"[{activity_time}] {student_name}: {description}")
+                
+                # Show warning toast for high severity
+                if severity == "high":
+                    self.show_toast(f"🚨 {student_name}: {description}", "error")
+                
+                self.logger.warning(f"Malicious activity from {student_name}: {description}")
+                
+        except Exception as e:
+            self.logger.error(f"Error handling malicious activity: {e}")
+    
     def show_toast(self, message: str, toast_type: str = "info"):
         """Show modern toast notification"""
         from PyQt5.QtWidgets import QLabel, QGraphicsOpacityEffect
@@ -615,19 +833,19 @@ Share this information with students to join the session."""
             details_text.setMaximumHeight(200)
             
             session_info = f"""Session Code: {self.session_code_label.text()}
-Password: {self.password_label.text()}
-Teacher IP: {self.ip_label.text()}
-WebSocket Port: 8765
-HTTP Port: 8080
-Connected Students: {len(self.connected_students)}
-Status: {'Active' if self.session_active else 'Inactive'}
-Focus Mode: {'Enabled' if self.focus_mode_active else 'Disabled'}
-Screen Sharing: {'Active' if self.screen_sharing_active else 'Inactive'}
+                    Password: {self.password_label.text()}
+                    Teacher IP: {self.ip_label.text()}
+                    WebSocket Port: 8765
+                    HTTP Port: 8080
+                    Connected Students: {len(self.connected_students)}
+                    Status: {'Active' if self.session_active else 'Inactive'}
+                    Focus Mode: {'Enabled' if self.focus_mode_active else 'Disabled'}
+                    Screen Sharing: {'Active' if self.screen_sharing_active else 'Inactive'}
 
-Instructions for Students:
-1. Open FocusClass Student application
-2. Use manual connection with the above details
-3. Or scan the QR code displayed in the main window"""
+                    Instructions for Students:
+                    1. Open FocusClass Student application
+                    2. Use manual connection with the above details
+                    3. Or scan the QR code displayed in the main window"""
             
             details_text.setPlainText(session_info)
             details_text.setStyleSheet("""
@@ -1017,17 +1235,435 @@ Instructions for Students:
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
         
-        # Student list header
-        header_layout = QHBoxLayout()
-        students_title = QLabel("Connected Students")
-        students_title.setFont(QFont("Arial", 12, QFont.Bold))
-        self.student_count_label = QLabel("(0)")
+    def refresh_student_list(self):
+        """Refresh the student list display with real IP addresses and actions"""
+        try:
+            self.student_table.setRowCount(len(self.connected_students))
+            
+            for row, (client_id, student_info) in enumerate(self.connected_students.items()):
+                # Name
+                name_item = QTableWidgetItem(student_info.get("name", "Unknown"))
+                self.student_table.setItem(row, 0, name_item)
+                
+                # Real IP Address
+                ip_item = QTableWidgetItem(student_info.get("ip_address", "unknown"))
+                self.student_table.setItem(row, 1, ip_item)
+                
+                # Status
+                status = student_info.get("status", "connected")
+                status_item = QTableWidgetItem(status.title())
+                if status == "connected":
+                    status_item.setStyleSheet("color: green; font-weight: bold;")
+                else:
+                    status_item.setStyleSheet("color: red; font-weight: bold;")
+                self.student_table.setItem(row, 2, status_item)
+                
+                # Battery
+                battery_level = student_info.get("battery_level", 100)
+                is_charging = student_info.get("is_charging", True)
+                battery_text = f"{battery_level}%"
+                if is_charging:
+                    battery_text += " 🔌"
+                if battery_level < 20:
+                    battery_text += " ⚠️"
+                battery_item = QTableWidgetItem(battery_text)
+                self.student_table.setItem(row, 3, battery_item)
+                
+                # Violations
+                violations = student_info.get("violations", 0)
+                violations_item = QTableWidgetItem(str(violations))
+                if violations > 0:
+                    violations_item.setStyleSheet("color: red; font-weight: bold;")
+                self.student_table.setItem(row, 4, violations_item)
+                
+                # Keystrokes
+                keystrokes = student_info.get("keystrokes", 0)
+                keystrokes_item = QTableWidgetItem(str(keystrokes))
+                self.student_table.setItem(row, 5, keystrokes_item)
+                
+                # Focus Mode
+                focus_mode = student_info.get("focus_mode", False)
+                focus_text = "ON" if focus_mode else "OFF"
+                focus_item = QTableWidgetItem(focus_text)
+                if focus_mode:
+                    focus_item.setStyleSheet("color: red; font-weight: bold;")
+                else:
+                    focus_item.setStyleSheet("color: green;")
+                self.student_table.setItem(row, 6, focus_item)
+                
+                # Actions
+                actions_widget = QWidget()
+                actions_layout = QHBoxLayout(actions_widget)
+                actions_layout.setContentsMargins(4, 2, 4, 2)
+                actions_layout.setSpacing(4)
+                
+                # Kick button
+                kick_btn = QPushButton("📴")
+                kick_btn.setToolTip("Disconnect Student")
+                kick_btn.setMaximumSize(30, 25)
+                kick_btn.setStyleSheet("""
+                    QPushButton {
+                        background-color: #dc3545;
+                        color: white;
+                        border: none;
+                        border-radius: 4px;
+                        font-size: 12px;
+                    }
+                    QPushButton:hover {
+                        background-color: #c82333;
+                    }
+                """)
+                kick_btn.clicked.connect(lambda checked, cid=client_id: self.kick_student(cid))
+                actions_layout.addWidget(kick_btn)
+                
+                # Monitor button
+                monitor_btn = QPushButton("👁️")
+                monitor_btn.setToolTip("View Student Screen")
+                monitor_btn.setMaximumSize(30, 25)
+                monitor_btn.setStyleSheet("""
+                    QPushButton {
+                        background-color: #007bff;
+                        color: white;
+                        border: none;
+                        border-radius: 4px;
+                        font-size: 12px;
+                    }
+                    QPushButton:hover {
+                        background-color: #0056b3;
+                    }
+                """)
+                monitor_btn.clicked.connect(lambda checked, cid=client_id: self.monitor_student(cid))
+                actions_layout.addWidget(monitor_btn)
+                
+                # Focus button
+                focus_btn = QPushButton("🎯")
+                focus_btn.setToolTip("Toggle Focus Mode")
+                focus_btn.setMaximumSize(30, 25)
+                focus_btn.setStyleSheet("""
+                    QPushButton {
+                        background-color: #ffc107;
+                        color: black;
+                        border: none;
+                        border-radius: 4px;
+                        font-size: 12px;
+                    }
+                    QPushButton:hover {
+                        background-color: #e0a800;
+                    }
+                """)
+                focus_btn.clicked.connect(lambda checked, cid=client_id: self.toggle_student_focus(cid))
+                actions_layout.addWidget(focus_btn)
+                
+                actions_layout.addStretch()
+                self.student_table.setCellWidget(row, 7, actions_widget)
+            
+            # Update student count
+            self.student_count_label.setText(f"({len(self.connected_students)})")
+            
+        except Exception as e:
+            self.logger.error(f"Error refreshing student list: {e}")
+    
+    def kick_student(self, client_id: str):
+        """Disconnect a student"""
+        try:
+            if client_id in self.connected_students:
+                student_name = self.connected_students[client_id].get("name", "Unknown")
+                
+                # Send disconnect message
+                self.schedule_async_task(self.network_manager._send_message(client_id, "force_disconnect", {
+                    "reason": "Disconnected by teacher"
+                }))
+                
+                self.show_toast(f"📴 Kicked {student_name}", "warning")
+                self.logger.info(f"Kicked student: {student_name}")
+                
+        except Exception as e:
+            self.logger.error(f"Error kicking student: {e}")
+    
+    def monitor_student(self, client_id: str):
+        """Request student screen view"""
+        try:
+            if client_id in self.connected_students:
+                student_name = self.connected_students[client_id].get("name", "Unknown")
+                
+                # Send screen request
+                self.schedule_async_task(self.network_manager._send_message(client_id, "screen_request", {
+                    "action": "request_screen"
+                }))
+                
+                self.show_toast(f"👁️ Requesting screen from {student_name}", "info")
+                self.logger.info(f"Requested screen from: {student_name}")
+                
+        except Exception as e:
+            self.logger.error(f"Error requesting student screen: {e}")
+    
+    def toggle_student_focus(self, client_id: str):
+        """Toggle focus mode for specific student"""
+        try:
+            if client_id in self.connected_students:
+                student_name = self.connected_students[client_id].get("name", "Unknown")
+                current_focus = self.connected_students[client_id].get("focus_mode", False)
+                new_focus = not current_focus
+                
+                # Update local state
+                self.connected_students[client_id]["focus_mode"] = new_focus
+                
+                # Send focus mode change
+                self.schedule_async_task(self.network_manager._send_message(client_id, "focus_mode", {
+                    "enabled": new_focus
+                }))
+                
+                # Refresh display
+                self.refresh_student_list()
+                
+                action = "enabled" if new_focus else "disabled"
+                self.show_toast(f"🎯 Focus mode {action} for {student_name}", "info")
+                self.logger.info(f"Focus mode {action} for: {student_name}")
+                
+        except Exception as e:
+            self.logger.error(f"Error toggling student focus: {e}")
+    
+    def start_session(self):
+        """Start a new session"""
+        self.schedule_async_task(self._start_session_async())
+    
+    async def _start_session_async(self):
+        """Async session start"""
+        try:
+            self.show_toast("🚀 Starting new session...", "info")
+            
+            # Generate session details
+            from common.network_manager import generate_session_code, generate_session_password
+            session_code = generate_session_code()
+            password = generate_session_password()
+            
+            # Initialize database
+            await self.db_manager.initialize_database()
+            
+            # Create session in database
+            teacher_ip = get_local_ip()
+            self.session_id = await self.db_manager.create_session(
+                session_code, password, teacher_ip
+            )
+            
+            # Start network server
+            server_info = await self.network_manager.start_teacher_server(session_code, password)
+            
+            # Update UI with session details
+            self.session_code_label.setText(session_code)
+            self.password_label.setText(password)
+            self.ip_label.setText(teacher_ip)
+            
+            # Generate QR code with enhanced data
+            qr_data = {
+                "type": "focusclass_session",
+                "teacher_ip": teacher_ip,
+                "session_code": session_code,
+                "password": password,
+                "version": "1.0.0",
+                "websocket_port": 8765,
+                "http_port": 8080
+            }
+            
+            import json
+            from common.utils import create_qr_code
+            qr_image = create_qr_code(json.dumps(qr_data), size=200)
+            
+            # Convert PIL image to QPixmap
+            from io import BytesIO
+            buffer = BytesIO()
+            qr_image.save(buffer, format="PNG")
+            buffer.seek(0)
+            qr_pixmap = QPixmap()
+            qr_pixmap.loadFromData(buffer.getvalue())
+            
+            # Scale QR code to fit label
+            scaled_pixmap = qr_pixmap.scaled(
+                self.qr_label.size(), 
+                Qt.KeepAspectRatio, 
+                Qt.SmoothTransformation
+            )
+            self.qr_label.setPixmap(scaled_pixmap)
+            
+            # Update button states
+            self.session_active = True
+            self.start_session_btn.setEnabled(False)
+            self.stop_session_btn.setEnabled(True)
+            self.focus_mode_checkbox.setEnabled(True)
+            self.start_sharing_btn.setEnabled(True)
+            self.copy_session_btn.setEnabled(True)
+            self.view_details_btn.setEnabled(True)
+            
+            # Start refresh timer
+            self.refresh_timer.start(5000)  # 5 seconds
+            
+            # Update status
+            self.status_label.setText(f"Session active: {session_code}")
+            
+            self.show_toast(f"✅ Session started! Code: {session_code}", "success")
+            self.logger.info(f"Session started: {session_code}")
+            
+        except Exception as e:
+            self.logger.error(f"Error starting session: {e}")
+            self.show_toast(f"❌ Failed to start session: {str(e)}", "error")
+    
+    def stop_session(self):
+        """Stop the current session"""
+        self.schedule_async_task(self._stop_session_async())
+    
+    async def _stop_session_async(self):
+        """Async session stop"""
+        try:
+            self.show_toast("🛁 Stopping session...", "info")
+            
+            # End session in database
+            if self.session_id:
+                await self.db_manager.end_session(self.session_id)
+            
+            # Stop network server
+            await self.network_manager.stop_server()
+            
+            # Stop screen sharing if active
+            if self.screen_sharing_active:
+                await self._stop_screen_sharing_async()
+            
+            # Reset UI
+            self.session_code_label.setText("Not started")
+            self.password_label.setText("Not started")
+            self.qr_label.clear()
+            self.qr_label.setText("QR Code will appear here")
+            
+            # Update button states
+            self.session_active = False
+            self.start_session_btn.setEnabled(True)
+            self.stop_session_btn.setEnabled(False)
+            self.focus_mode_checkbox.setEnabled(False)
+            self.focus_mode_checkbox.setChecked(False)
+            self.start_sharing_btn.setEnabled(False)
+            self.stop_sharing_btn.setEnabled(False)
+            self.copy_session_btn.setEnabled(False)
+            self.view_details_btn.setEnabled(False)
+            
+            # Clear data
+            self.connected_students.clear()
+            self.refresh_student_list()
+            
+            # Stop timers
+            self.refresh_timer.stop()
+            
+            # Update status
+            self.status_label.setText("Ready")
+            
+            self.show_toast("✅ Session ended successfully", "success")
+            self.logger.info("Session ended")
+            
+        except Exception as e:
+            self.logger.error(f"Error stopping session: {e}")
+            self.show_toast(f"❌ Error stopping session: {str(e)}", "error")
+    
+    def toggle_focus_mode(self, enabled: bool):
+        """Toggle focus mode for all students"""
+        self.schedule_async_task(self._toggle_focus_mode_async(enabled))
+    
+    async def _toggle_focus_mode_async(self, enabled: bool):
+        """Async focus mode toggle"""
+        try:
+            if self.session_id:
+                await self.db_manager.update_focus_mode(self.session_id, enabled)
+            
+            # Broadcast to all students
+            await self.network_manager.broadcast_message("focus_mode", {
+                "enabled": enabled
+            })
+            
+            # Update all students' focus mode status
+            for client_id in self.connected_students:
+                self.connected_students[client_id]["focus_mode"] = enabled
+            
+            self.focus_mode_active = enabled
+            self.refresh_student_list()
+            
+            action = "enabled" if enabled else "disabled"
+            self.show_toast(f"🎯 Focus mode {action} for all students", "info")
+            self.logger.info(f"Focus mode {action}")
+            
+        except Exception as e:
+            self.logger.error(f"Error changing focus mode: {e}")
+            self.show_toast(f"❌ Error changing focus mode: {str(e)}", "error")
+    
+    def clear_violation_log(self):
+        """Clear the violation log"""
+        self.violation_log.clear()
+        self.show_toast("🗁️ Violation log cleared", "info")
+    
+    def clear_malicious_activities(self):
+        """Clear malicious activities log"""
+        self.malicious_list.clear()
+        self.show_toast("🗁️ Malicious activities cleared", "info")
+    
+    def export_activity_report(self):
+        """Export activity report"""
+        try:
+            from PyQt5.QtWidgets import QFileDialog
+            import datetime
+            
+            filename, _ = QFileDialog.getSaveFileName(
+                self, "Export Activity Report", 
+                f"focusclass_report_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                "Text Files (*.txt);;All Files (*)"
+            )
+            
+            if filename:
+                with open(filename, 'w', encoding='utf-8') as f:
+                    f.write(f"FocusClass Activity Report\n")
+                    f.write(f"Generated: {datetime.datetime.now()}\n\n")
+                    
+                    # Session info
+                    if self.session_active:
+                        f.write(f"Session Code: {self.session_code_label.text()}\n")
+                        f.write(f"Teacher IP: {self.ip_label.text()}\n")
+                    
+                    # Connected students
+                    f.write(f"\nConnected Students ({len(self.connected_students)}):\n")
+                    for client_id, info in self.connected_students.items():
+                        f.write(f"- {info.get('name', 'Unknown')} ({info.get('ip_address', 'unknown')})\n")
+                        f.write(f"  Violations: {info.get('violations', 0)}\n")
+                        f.write(f"  Keystrokes: {info.get('keystrokes', 0)}\n")
+                        f.write(f"  Battery: {info.get('battery_level', 100)}%\n")
+                    
+                    # Violations
+                    f.write(f"\nViolations:\n")
+                    f.write(self.violation_log.toPlainText())
+                    
+                    # Malicious activities
+                    f.write(f"\nMalicious Activities:\n")
+                    f.write(self.malicious_list.toPlainText())
+                
+                self.show_toast(f"📄 Report exported to {filename}", "success")
+                
+        except Exception as e:
+            self.logger.error(f"Error exporting report: {e}")
+            self.show_toast(f"❌ Error exporting report: {str(e)}", "error")
+    
+    def setup_timers(self):
+        """Setup periodic timers"""
+        self.refresh_timer = QTimer()
+        self.refresh_timer.timeout.connect(self.refresh_student_list)
         
-        header_layout.addWidget(students_title)
-        header_layout.addWidget(self.student_count_label)
-        header_layout.addStretch()
-        
-        right_layout.addLayout(header_layout)
+        self.performance_timer = QTimer()
+        self.performance_timer.timeout.connect(self.update_performance_stats)
+        self.performance_timer.start(5000)
+    
+    def update_performance_stats(self):
+        """Update performance statistics"""
+        try:
+            # Update network label with current info
+            if hasattr(self, 'network_label'):
+                local_ip = get_local_ip()
+                self.network_label.setText(f"IP: {local_ip}")
+            
+        except Exception as e:
+            self.logger.error(f"Error updating performance stats: {e}")
         
         # Student table with enhanced columns
         self.student_table = QTableWidget()
