@@ -264,7 +264,22 @@ class NetworkManager:
         app.router.add_post('/api/screen_request', self._handle_screen_request)
         
         # Static file serving (for QR codes, etc.)
-        app.router.add_static('/', path='assets', name='static')
+        try:
+            from pathlib import Path
+            assets_dir = Path("assets")
+            
+            # Create assets directory if it doesn't exist
+            if not assets_dir.exists():
+                assets_dir.mkdir(parents=True, exist_ok=True)
+                self.logger.info("Created assets directory")
+            
+            # Add static file serving
+            app.router.add_static('/', path=str(assets_dir), name='static')
+            self.logger.info(f"Static file serving enabled from {assets_dir}")
+            
+        except Exception as e:
+            self.logger.warning(f"Could not setup static file serving: {e}")
+            # Continue without static file serving - not critical for core functionality
         
         runner = web.AppRunner(app)
         await runner.setup()
