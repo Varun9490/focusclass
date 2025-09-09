@@ -656,237 +656,60 @@ class TeacherMainWindow(QMainWindow):
         self.status_bar.addPermanentWidget(self.network_label)
     
     def create_left_panel(self):
-        """Create left control panel with improved layout"""
+        """
+        Creates the main control panel with a clean, organized layout.
+        This function acts as an orchestrator, calling helper methods to build each section.
+        """
+        # Main container widget for the panel
         left_panel = QWidget()
-        left_panel.setMaximumWidth(450)  # Increased width
+        left_panel.setMaximumWidth(450)
+        
+        # Vertical layout to stack the group boxes
         left_layout = QVBoxLayout(left_panel)
-        left_layout.setSpacing(15)
-        
-        # Session info group with improved layout
+        left_layout.setSpacing(20) # Space between group boxes
+        left_layout.setContentsMargins(10, 10, 10, 10)
+
+        # --- 1. Session Information Group ---
         session_group = QGroupBox("📊 Session Information")
-        session_group.setStyleSheet("""
-            QGroupBox {
-                font-weight: bold;
-                font-size: 14px;
-                border: 2px solid #ddd;
-                border-radius: 10px;
-                margin-top: 10px;
-                padding-top: 15px;
-                background-color: rgba(255, 255, 255, 0.95);
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 10px 0 10px;
-                color: #333;
-            }
-        """)
-        
         session_layout = QVBoxLayout(session_group)
         session_layout.setSpacing(15)
-        
-        # Session details in separate cards
-        details_container = QWidget()
-        details_layout = QVBoxLayout(details_container)
-        details_layout.setSpacing(10)
-        
-        # Session Code Card
-        code_card = self.create_info_card("Session Code", "Not started", "#4CAF50")
-        self.session_code_label = code_card.findChild(QLabel, "value_label")
-        details_layout.addWidget(code_card)
-        
-        # Password Card
-        pass_card = self.create_info_card("Password", "Not started", "#FF9800")
-        self.password_label = pass_card.findChild(QLabel, "value_label")
-        details_layout.addWidget(pass_card)
-        
-        # IP Address Card
+
+        # Create info cards with proper method calls
+        session_code_card = self.create_info_card("Session Code", "Not Started", "#4CAF50")
+        password_card = self.create_info_card("Password", "Not Started", "#FF9800")
         ip_card = self.create_info_card("Teacher IP", get_local_ip(), "#2196F3")
+        
+        # Get the value labels from the cards for direct access
+        self.session_code_label = session_code_card.findChild(QLabel, "value_label")
+        self.password_label = password_card.findChild(QLabel, "value_label")
         self.ip_label = ip_card.findChild(QLabel, "value_label")
-        details_layout.addWidget(ip_card)
         
-        session_layout.addWidget(details_container)
-        
-        # QR Code in separate section with proper sizing
-        qr_container = QWidget()
-        qr_container.setStyleSheet("""
-            QWidget {
-                background-color: white;
-                border: 2px dashed #ccc;
-                border-radius: 12px;
-                padding: 20px;
-            }
-        """)
-        qr_layout = QVBoxLayout(qr_container)
-        qr_layout.setSpacing(10)
-        
-        qr_title = QLabel("🔗 Connection QR Code")
-        qr_title.setFont(QFont("Arial", 12, QFont.Bold))
-        qr_title.setAlignment(Qt.AlignCenter)
-        qr_title.setStyleSheet("color: #666; border: none; padding: 0;")
-        qr_layout.addWidget(qr_title)
-        
-        self.qr_label = QLabel("QR Code will appear here")
-        self.qr_label.setMinimumSize(220, 220)  # Increased size
-        self.qr_label.setMaximumSize(220, 220)
-        self.qr_label.setStyleSheet("""
-            QLabel {
-                background-color: #f9f9f9;
-                border: 1px solid #ddd;
-                border-radius: 8px;
-                padding: 10px;
-                color: #999;
-                font-size: 12px;
-            }
-        """)
-        self.qr_label.setAlignment(Qt.AlignCenter)
-        self.qr_label.setScaledContents(True)  # Scale QR code properly
-        qr_layout.addWidget(self.qr_label, 0, Qt.AlignCenter)
-        
-        # Add Copy Session Details button
-        copy_container = QWidget()
-        copy_layout = QHBoxLayout(copy_container)
-        copy_layout.setContentsMargins(0, 10, 0, 10)
-        
-        self.copy_session_btn = QPushButton("📋 Copy Session Details")
-        self.copy_session_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #17a2b8;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 6px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #138496;
-            }
-            QPushButton:disabled {
-                background-color: #cccccc;
-            }
-        """)
-        self.copy_session_btn.setEnabled(False)
-        self.copy_session_btn.clicked.connect(self.copy_session_details)
-        
-        self.view_details_btn = QPushButton("📄 View Details")
-        self.view_details_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #6f42c1;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 6px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #5a2d91;
-            }
-            QPushButton:disabled {
-                background-color: #cccccc;
-            }
-        """)
-        self.view_details_btn.setEnabled(False)
-        self.view_details_btn.clicked.connect(self.view_session_details)
-        
-        copy_layout.addWidget(self.copy_session_btn)
-        copy_layout.addWidget(self.view_details_btn)
-        copy_container.setLayout(copy_layout)
-        
-        qr_layout.addWidget(copy_container)
+        # Add info cards to layout
+        session_layout.addWidget(session_code_card)
+        session_layout.addWidget(password_card)
+        session_layout.addWidget(ip_card)
+
+        # The QR code and its buttons are built by another helper for cleanliness
+        qr_container = self.create_qr_section()
         session_layout.addWidget(qr_container)
         left_layout.addWidget(session_group)
-        
-        # Controls group
+
+        # --- 2. Session Controls Group ---
         controls_group = QGroupBox("🎮 Session Controls")
-        controls_group.setStyleSheet("""
-            QGroupBox {
-                font-weight: bold;
-                font-size: 14px;
-                border: 2px solid #ddd;
-                border-radius: 10px;
-                margin-top: 10px;
-                padding-top: 15px;
-                background-color: rgba(255, 255, 255, 0.95);
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 10px 0 10px;
-                color: #333;
-            }
-        """)
         controls_layout = QVBoxLayout(controls_group)
-        controls_layout.setSpacing(15)
-        
-        # Create controls section
         self.create_controls_section(controls_layout)
-        
-        # Add controls group to left layout
         left_layout.addWidget(controls_group)
-        
-        # Violation log
+
+        # --- 3. Violation Log Group ---
         violation_group = QGroupBox("⚠️ Violation Log")
-        violation_group.setStyleSheet("""
-            QGroupBox {
-                font-weight: bold;
-                font-size: 14px;
-                border: 2px solid #ddd;
-                border-radius: 10px;
-                margin-top: 10px;
-                padding-top: 15px;
-                background-color: rgba(255, 255, 255, 0.95);
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 10px 0 10px;
-                color: #333;
-            }
-        """)
         violation_layout = QVBoxLayout(violation_group)
-        
-        log_header = QHBoxLayout()
-        log_title = QLabel("Recent Violations")
-        self.clear_log_btn = QPushButton("🗑️ Clear")
-        self.clear_log_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #6c757d;
-                color: white;
-                border: none;
-                padding: 5px 10px;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #5a6268;
-            }
-        """)
-        self.clear_log_btn.clicked.connect(self.clear_violation_log)
-        
-        log_header.addWidget(log_title)
-        log_header.addStretch()
-        log_header.addWidget(self.clear_log_btn)
-        violation_layout.addLayout(log_header)
-        
-        self.violation_log = QTextEdit()
-        self.violation_log.setReadOnly(True)
-        self.violation_log.setMaximumHeight(150)
-        self.violation_log.setStyleSheet("""
-            QTextEdit {
-                background-color: #f8f9fa;
-                border: 1px solid #dee2e6;
-                border-radius: 4px;
-                padding: 8px;
-                font-family: 'Courier New', monospace;
-                font-size: 11px;
-            }
-        """)
-        violation_layout.addWidget(self.violation_log)
-        
+        self.create_violation_log_section(violation_layout)
         left_layout.addWidget(violation_group)
+
+        # Add stretch at the bottom to push everything up
         left_layout.addStretch()
         
         return left_panel
-    
     def copy_session_details(self):
         """Copy session details to clipboard"""
         try:
@@ -1074,6 +897,9 @@ Share this information with students to join the session."""
             }
         """)
         
+        self.start_session_btn.clicked.connect(self.start_session)
+        session_btn_layout.addWidget(self.start_session_btn)
+        
         self.stop_session_btn = QPushButton("🛑 Stop Session")
         self.stop_session_btn.setStyleSheet("""
             QPushButton {
@@ -1093,12 +919,9 @@ Share this information with students to join the session."""
             }
         """)
         self.stop_session_btn.setEnabled(False)
-        
-        self.start_session_btn.clicked.connect(self.start_session)
         self.stop_session_btn.clicked.connect(self.stop_session)
-        
-        session_btn_layout.addWidget(self.start_session_btn)
         session_btn_layout.addWidget(self.stop_session_btn)
+        
         controls_layout.addLayout(session_btn_layout)
         
         # Focus mode
@@ -1161,6 +984,131 @@ Share this information with students to join the session."""
         screen_btn_layout.addWidget(self.start_sharing_btn)
         screen_btn_layout.addWidget(self.stop_sharing_btn)
         controls_layout.addLayout(screen_btn_layout)
+    
+    def create_qr_section(self):
+        """Create QR code section"""
+        qr_container = QWidget()
+        qr_layout = QVBoxLayout(qr_container)
+        
+        # QR code label
+        qr_title = QLabel("📱 Quick Connect QR Code")
+        qr_title.setFont(QFont("Arial", 10, QFont.Bold))
+        qr_title.setAlignment(Qt.AlignCenter)
+        qr_title.setStyleSheet("color: #333; margin-bottom: 10px;")
+        qr_layout.addWidget(qr_title)
+        
+        self.qr_label = QLabel()
+        self.qr_label.setMinimumSize(200, 200)
+        self.qr_label.setMaximumSize(200, 200)
+        self.qr_label.setAlignment(Qt.AlignCenter)
+        self.qr_label.setStyleSheet("""
+            QLabel {
+                background-color: white;
+                border: 2px solid #ddd;
+                border-radius: 8px;
+                padding: 10px;
+            }
+        """)
+        self.qr_label.setText("QR Code will appear here")
+        qr_layout.addWidget(self.qr_label, 0, Qt.AlignCenter)
+        
+        # QR action buttons
+        qr_btn_layout = QHBoxLayout()
+        
+        self.copy_session_btn = QPushButton("📋 Copy Details")
+        self.copy_session_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #17a2b8;
+                color: white;
+                border: none;
+                padding: 6px 12px;
+                border-radius: 4px;
+                font-weight: bold;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #138496;
+            }
+            QPushButton:disabled {
+                background-color: #cccccc;
+            }
+        """)
+        self.copy_session_btn.setEnabled(False)
+        self.copy_session_btn.clicked.connect(self.copy_session_details)
+        
+        self.view_details_btn = QPushButton("🔍 View Details")
+        self.view_details_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #6c757d;
+                color: white;
+                border: none;
+                padding: 6px 12px;
+                border-radius: 4px;
+                font-weight: bold;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #5a6268;
+            }
+            QPushButton:disabled {
+                background-color: #cccccc;
+            }
+        """)
+        self.view_details_btn.setEnabled(False)
+        self.view_details_btn.clicked.connect(self.view_session_details)
+        
+        qr_btn_layout.addWidget(self.copy_session_btn)
+        qr_btn_layout.addWidget(self.view_details_btn)
+        qr_layout.addLayout(qr_btn_layout)
+        
+        return qr_container
+    
+    def create_violation_log_section(self, violation_layout):
+        """Create violation log section"""
+        # Violation log header
+        log_header = QHBoxLayout()
+        
+        log_title = QLabel("⚠️ Recent Violations")
+        log_title.setFont(QFont("Arial", 10, QFont.Bold))
+        log_title.setStyleSheet("color: #333;")
+        log_header.addWidget(log_title)
+        
+        # Clear button
+        clear_log_btn = QPushButton("🗑️ Clear")
+        clear_log_btn.setMaximumWidth(60)
+        clear_log_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #6c757d;
+                color: white;
+                border: none;
+                padding: 4px 8px;
+                border-radius: 4px;
+                font-size: 9px;
+            }
+            QPushButton:hover {
+                background-color: #5a6268;
+            }
+        """)
+        clear_log_btn.clicked.connect(self.clear_violation_log)
+        log_header.addWidget(clear_log_btn)
+        
+        violation_layout.addLayout(log_header)
+        
+        # Violation log text area
+        self.violation_log = QTextEdit()
+        self.violation_log.setMaximumHeight(150)
+        self.violation_log.setReadOnly(True)
+        self.violation_log.setStyleSheet("""
+            QTextEdit {
+                background-color: #fff3cd;
+                border: 1px solid #ffeeba;
+                border-radius: 4px;
+                padding: 8px;
+                font-family: 'Courier New', monospace;
+                font-size: 10px;
+            }
+        """)
+        violation_layout.addWidget(self.violation_log)
         
     def start_screen_sharing(self):
         """Start screen sharing with monitor selection"""
