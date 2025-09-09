@@ -1,103 +1,220 @@
-"""Production-Ready Build Script for FocusClass
-Enhanced PyInstaller configuration with comprehensive bundling
+"""
+Production Build Script for FocusClass
+
+This script automates the process of building a production-ready executable
+for the FocusClass application using PyInstaller.
+
+It performs the following steps:
+1. Validates the build environment.
+2. Generates a version information file.
+3. Freezes dependencies into a requirements.txt file.
+4. Runs PyInstaller to create the executable.
+5. Cleans up temporary build files.
 """
 
 import os
 import sys
-import shutil
 import subprocess
+import shutil
 from pathlib import Path
-import logging
-from datetime import datetime
 
-# Setup logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+# --- Configuration ---
+try:
+    from build_config import (
+        APP_NAME,
+        APP_VERSION,
+        AUTHOR,
+        PYINSTALLER_CONFIG,
+        CORE_DEPENDENCIES,
+        DEV_DEPENDENCIES,
+        DIST_DIR,
+        BUILD_DIR,
+        BASE_DIR,
+        ICON_PATH
+    )
+except ImportError:
+    print("Error: build_config.py not found. Please ensure it's in the same directory.")
+    sys.exit(1)
 
-def check_dependencies():
-    """Check if all required dependencies are available"""
-    logger.info("Checking build dependencies...")
-    
-    required_modules = [
-        'PyInstaller',
-        'PyQt5',
-        'qasync',
-        'websockets',
-        'mss',
-        'psutil',
-        'PIL',
-        'qrcode',
-        'numpy'
-    ]
-    
-    missing_modules = []
-    
-    for module in required_modules:
-        try:
-            __import__(module)
-            logger.info(f"✓ {module} - Available")
-        except ImportError:
-            missing_modules.append(module)
-            logger.warning(f"✗ {module} - Missing")
-    
-    if missing_modules:
-        logger.error(f"Missing required modules: {', '.join(missing_modules)}")
-        logger.error("Please install missing modules using: pip install -r requirements.txt")
+# --- Helper Functions ---
+
+def run_command(command, description):
+    """Runs a shell command and prints its status."""
+    print(f"--- {description} ---")
+    try:
+        subprocess.check_call(command, shell=True)
+        print(f"Success: {description} completed.\n")
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"Error: {description} failed. Return code: {e.returncode}\n")
+        return False
+    except FileNotFoundError:
+        print(f"Error: Command '{command.split()[0]}' not found. Is it installed and in your PATH?")
+        return False
+
+def clean_directory(dir_path, description):
+    """Removes a directory if it exists."""
+    if dir_path.exists():
+        print(f"Cleaning up {description}...")
+        shutil.rmtree(dir_path)
+
+def create_directory(dir_path, description):
+    """Creates a directory if it doesn't exist."""
+    if not dir_path.exists():
+        print(f"Creating {description}...")
+        dir_path.mkdir(parents=True)
+
+# --- Build Steps ---
+
+def step_1_validate_environment():
+    """Checks for required tools like Python and pip."""
+    print("--- Step 1: Validating Environment ---")
+    if sys.version_info < (3, 8):
+        print("Error: Python 3.8 or higher is required.")
         return False
     
-    logger.info("All required dependencies are available")
+    print("Python version check passed.")
+    
+    if not run_command("pip --version", "Checking pip availability"):
+        return False
+        
+    print("Environment validation successful.\n")
     return True
 
-def clean_build_dirs():
-    """Clean previous build directories"""
-    dirs_to_clean = ['build', 'dist', '__pycache__']
+def step_2_install_dependencies():
+    """Installs core and development dependencies using pip."""
+    print("--- Step 2: Installing Dependencies ---")
     
-    for dir_name in dirs_to_clean:
-        if Path(dir_name).exists():
-            logger.info(f"Cleaning {dir_name} directory...")
-            shutil.rmtree(dir_name)
+    requirements = CORE_DEPENDENCIES + DEV_DEPENDENCIES
     
-    # Clean .spec files
-    for spec_file in Path('.').glob('*.spec'):
-        logger.info(f"Removing {spec_file}...")
+    if not run_command(
+        f"pip install --upgrade pip",
+        "Upgrading pip"
+    ):
+        return False
+
+    if not run_command(
+        f"pip install -r {BASE_DIR / 'requirements.txt'}",
+        "Installing dependencies from requirements.txt"
+    ):
+        # Fallback to installing from config if requirements.txt is missing/outdated
+        print("requirements.txt failed, trying to install from build_config.py...")
+        if not run_command(
+            f"pip install {' '.join(requirements)}",
+            "Installing dependencies"
+        ):
+            return False
+            
+    print("Dependency installation successful.\n")
+    return True
+
+def step_3_generate_build_files():
+    """Generates version file and updates requirements.txt."""
+    print("--- Step 3: Generating Build Files ---")
+    
+    # Generate requirements.txt
+    try:
+        from build_config import generate_requirements_file
+        generate_requirements_file()
+    except Exception as e:
+        print(f"Could not generate requirements.txt: {e}")
+        return False
+        
+    print("Build file generation successful.\n")
+    return True
+
+def step_4_run_pyinstaller():
+    """Builds the executable using PyInstaller."""
+    print("--- Step 4: Building Executable with PyInstaller ---")
+    
+    # Clean previous builds
+    clean_directory(DIST_DIR, "old dist folder")
+    clean_directory(BUILD_DIR, "old build folder")
+    
+    # Create directories
+    create_directory(DIST_DIR, "dist folder")
+    create_directory(BUILD_DIR, "build folder")
+
+    # Construct PyInstaller command
+    command = [
+        "pyinstaller",
+        f'--name="{PYINSTALLER_CONFIG["name"]}"',
+        f'--icon="{PYINSTALLER_CONFIG["icon"]}"',
+        "--windowed",
+        "--onefile",
+        "--noconfirm",
+        f'--distpath="{PYINSTALLER_CONFIG["distpath"]}"',
+        f'--workpath="{PYINSTALLER_CONFIG["buildpath"]}"',
+        f'--specpath="{PYINSTALLER_CONFIG["specpath"]}"',
+    ]
+
+    # Add hidden imports
+    for imp in PYINSTALLER_CONFIG["hidden_imports"]:
+        command.append(f'--hidden-import="{imp}"')
+        
+    # Add data files (assets, etc.)
+    for data_src, data_dest in PYINSTALLER_CONFIG["datas"]:
+        command.append(f'--add-data="{data_src}{os.pathsep}{data_dest}"')
+
+    # Add main script
+    command.append(PYINSTALLER_CONFIG["script"])
+    
+    full_command = " ".join(command)
+    
+    if not run_command(full_command, "Running PyInstaller"):
+        print("PyInstaller build failed.")
+        return False
+        
+    print("PyInstaller build successful.\n")
+    return True
+
+def step_5_finalize_build():
+    """Finalizes the build, cleans up, and provides a summary."""
+    print("--- Step 5: Finalizing Build ---")
+    
+    # Clean up temporary files
+    clean_directory(BUILD_DIR, "build folder")
+    spec_file = BASE_DIR / f"{APP_NAME}.spec"
+    if spec_file.exists():
+        print("Removing .spec file...")
         spec_file.unlink()
-
-def ensure_directories():
-    """Ensure required directories exist"""
-    required_dirs = ['logs', 'exports', 'assets']
+        
+    # Summary
+    print("-----------------------------------------")
+    print("         BUILD COMPLETED         ")
+    print("-----------------------------------------")
+    print(f"App Name:    {APP_NAME}")
+    print(f"Version:     {APP_VERSION}")
+    print(f"Executable:  {DIST_DIR / (APP_NAME + '.exe')}")
+    print("-----------------------------------------")
     
-    for dir_name in required_dirs:
-        Path(dir_name).mkdir(exist_ok=True)
-        logger.info(f"Ensured {dir_name} directory exists")
+    return True
 
-def create_production_spec():
-    """Create comprehensive PyInstaller spec file"""
-    spec_content = '''
-# -*- mode: python ; coding: utf-8 -*-
+# --- Main Execution ---
 
-import sys
-from pathlib import Path
+def main():
+    """Main build process orchestrator."""
+    print("=========================================")
+    print(f"  STARTING {APP_NAME} PRODUCTION BUILD  ")
+    print("=========================================\n")
+    
+    build_steps = [
+        step_1_validate_environment,
+        step_2_install_dependencies,
+        step_3_generate_build_files,
+        step_4_run_pyinstaller,
+        step_5_finalize_build
+    ]
+    
+    for i, step in enumerate(build_steps, 1):
+        if not step():
+            print(f"\nBuild failed at Step {i}: {step.__name__}")
+            sys.exit(1)
+            
+    print("\nBuild process finished successfully!")
 
-# Get the base directory
-base_dir = Path(SPECPATH)
-
-# Define data files and directories to include
-datas = [
-    (str(base_dir / 'src'), 'src'),
-    (str(base_dir / 'assets'), 'assets'),
-    (str(base_dir / 'README.md'), '.'),
-    (str(base_dir / 'requirements.txt'), '.'),
-]
-
-# Hidden imports for proper module resolution
-hiddenimports = [
-    'qasync',
-    'asyncio',
-    'PyQt5.QtCore',
-    'PyQt5.QtGui', 
-    'PyQt5.QtWidgets',
-    'PyQt5.QtNetwork',
-    'websockets',
+if __name__ == "__main__":
+    main()
     'websockets.server',
     'websockets.client',
     'mss',

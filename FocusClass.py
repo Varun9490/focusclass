@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).parent / 'src'))
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QMessageBox, QFrame, QGridLayout, QGraphicsDropShadowEffect,
-    QSplashScreen, QProgressBar, QDesktopWidget
+    QSplashScreen, QProgressBar, QDesktopWidget, QScrollArea
 )
 from PyQt5.QtCore import Qt, QSize, QTimer, QPropertyAnimation, QEasingCurve, QRect, pyqtSignal
 from PyQt5.QtGui import QFont, QIcon, QPalette, QColor, QPixmap, QPainter, QLinearGradient, QBrush
@@ -114,6 +114,7 @@ class ModernButton(QPushButton):
         
         scheme = color_schemes.get(color_scheme, color_schemes["blue"])
         
+        # Qt stylesheet with proper supported properties only
         self.setStyleSheet(f"""
             QPushButton {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -130,15 +131,13 @@ class ModernButton(QPushButton):
             QPushButton:hover {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 {scheme['hover']}, stop:1 {scheme['primary']});
-                transform: scale(1.02);
             }}
             QPushButton:pressed {{
                 background: {scheme['pressed']};
-                transform: scale(0.98);
             }}
         """)
         
-        # Animation setup
+        # Animation setup (keep geometry animation for hover/press effect)
         self.animation = QPropertyAnimation(self, b"geometry")
         self.animation.setDuration(200)
         self.animation.setEasingCurve(QEasingCurve.OutCubic)
@@ -190,7 +189,9 @@ class WelcomeWindow(QMainWindow):
     def setup_ui(self):
         """Setup the enhanced modern UI with material design"""
         self.setWindowTitle(f"{APP_NAME} v{APP_VERSION} - Professional Edition")
-        self.setFixedSize(800, 700)
+        # Use proper window sizing for better visibility
+        self.setMinimumSize(800, 700)
+        self.resize(1000, 800)
         self.setWindowFlags(Qt.Window | Qt.WindowCloseButtonHint)
         
         # Center the window
@@ -224,9 +225,13 @@ class WelcomeWindow(QMainWindow):
             }
         """)
         
-        # Central widget
+        # Central widget (put content into a scroll area so small screens can still access all controls)
         central_widget = QWidget()
-        self.setCentralWidget(central_widget)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setWidget(central_widget)
+        self.setCentralWidget(scroll)
         
         # Main layout with better spacing
         main_layout = QVBoxLayout(central_widget)
@@ -240,15 +245,14 @@ class WelcomeWindow(QMainWindow):
         header_layout.setContentsMargins(40, 30, 40, 30)
         header_layout.setSpacing(20)
         
-        # Animated title with enhanced styling
+        # Enhanced title with proper styling (no gradient for compatibility)
         title_label = QLabel(f"🎓 {APP_NAME}")
         title_label.setFont(QFont("Segoe UI", 36, QFont.Bold))
         title_label.setAlignment(Qt.AlignCenter)
         title_label.setStyleSheet("""
-            color: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                stop:0 #4A90E2, stop:0.5 #9B59B6, stop:1 #4A90E2);
+            color: #4A90E2;
             margin-bottom: 10px;
-            text-shadow: 2px 2px 8px rgba(0,0,0,0.1);
+            font-weight: bold;
         """)
         header_layout.addWidget(title_label)
         
@@ -344,7 +348,6 @@ class WelcomeWindow(QMainWindow):
         mode_label.setStyleSheet("""
             color: #2c3e50;
             margin-bottom: 20px;
-            text-shadow: 1px 1px 3px rgba(0,0,0,0.1);
         """)
         selection_layout.addWidget(mode_label)
         
@@ -512,12 +515,19 @@ class WelcomeWindow(QMainWindow):
         
     def center_window(self):
         """Center the window on screen"""
-        screen = QApplication.desktop().screenGeometry()
-        size = self.geometry()
-        self.move(
-            (screen.width() - size.width()) // 2,
-            (screen.height() - size.height()) // 2
-        )
+        # Use primary screen's available geometry for correct centering on multi-monitor setups
+        try:
+            screen_geo = QApplication.primaryScreen().availableGeometry()
+            size = self.geometry()
+            self.move(
+                (screen_geo.width() - size.width()) // 2 + screen_geo.x(),
+                (screen_geo.height() - size.height()) // 2 + screen_geo.y()
+            )
+        except Exception:
+            # Fallback to older API
+            screen = QApplication.desktop().screenGeometry()
+            size = self.geometry()
+            self.move((screen.width() - size.width()) // 2, (screen.height() - size.height()) // 2)
         
     def launch_teacher(self):
         """Launch teacher application"""

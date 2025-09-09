@@ -523,6 +523,11 @@ class NetworkManager:
         
         self.logger.debug(f"Message from {client_id}: {message_type}")
         
+        # Handle authentication specially for teacher
+        if message_type == "authenticate" and self.is_teacher:
+            await self._handle_authentication(client_id, message_data)
+            return
+        
         if message_type in self.message_handlers:
             try:
                 await self.message_handlers[message_type](client_id, message_data)
@@ -530,6 +535,40 @@ class NetworkManager:
                 self.logger.error(f"Error in message handler {message_type}: {e}")
         else:
             self.logger.warning(f"No handler for message type: {message_type}")
+    
+    async def _handle_authentication(self, client_id: str, data: dict):
+        """Handle student authentication"""
+        try:
+            student_name = data.get("student_name")
+            password = data.get("password")
+            session_code = data.get("session_code")
+            
+            # Validate credentials
+            if password == self.session_password and session_code == self.session_code:
+                # Authentication successful
+                await self._send_message(client_id, "auth_success", {
+                    "message": "Authentication successful",
+                    "student_name": student_name,
+                    "session_code": session_code
+                })
+                
+                # Notify application layer
+                if "authenticate" in self.message_handlers:
+                    await self.message_handlers["authenticate"](client_id, data)
+                    
+            else:
+                # Authentication failed
+                await self._send_message(client_id, "auth_failed", {
+                    "reason": "Invalid credentials"
+                })
+                
+                # Close connection
+                websocket = self.connections.get(client_id)
+                if websocket:
+                    await websocket.close()
+                    
+        except Exception as e:
+            self.logger.error(f"Authentication error for {client_id}: {e}")
     
     async def _send_message(self, client_id: str, message_type: str, data: dict):
         """Send message to specific client"""

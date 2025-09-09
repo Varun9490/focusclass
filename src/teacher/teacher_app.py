@@ -45,6 +45,7 @@ from common.utils import (
     get_local_ip, format_duration, format_bytes, EventEmitter
 )
 from common.config import *
+from .performance_monitor import PerformanceMonitor
 
 
 class TeacherMainWindow(QMainWindow):
@@ -58,6 +59,8 @@ class TeacherMainWindow(QMainWindow):
         self.db_manager = DatabaseManager()
         self.network_manager = NetworkManager(is_teacher=True)
         self.screen_capture = ScreenCapture()
+        
+        self.performance_monitor = PerformanceMonitor()
         
         # Session state
         self.session_id = None
@@ -101,6 +104,153 @@ class TeacherMainWindow(QMainWindow):
             from PyQt5.QtCore import QTimer
             timer = QTimer()
             timer.singleShot(0, lambda: asyncio.ensure_future(coro))
+    def show_toast(self, message: str, toast_type: str = "info"):
+        """Show modern toast notification"""
+        from PyQt5.QtWidgets import QLabel, QGraphicsOpacityEffect
+        from PyQt5.QtCore import QPropertyAnimation, QEasingCurve
+        
+        # Create toast widget
+        toast = QLabel(message, self)
+        toast.setWordWrap(True)
+        toast.setMaximumWidth(400)
+        
+        # Style based on type
+        if toast_type == "success":
+            bg_color = "rgba(76, 175, 80, 0.95)"
+            text_color = "white"
+            icon = "✅"
+        elif toast_type == "error":
+            bg_color = "rgba(244, 67, 54, 0.95)"
+            text_color = "white"
+            icon = "❌"
+        elif toast_type == "warning":
+            bg_color = "rgba(255, 152, 0, 0.95)"
+            text_color = "white"
+            icon = "⚠️"
+        else:  # info
+            bg_color = "rgba(33, 150, 243, 0.95)"
+            text_color = "white"
+            icon = "ℹ️"
+        
+        toast.setText(f"{icon} {message}")
+        toast.setStyleSheet(f"""
+            QLabel {{
+                background-color: {bg_color};
+                color: {text_color};
+                border: none;
+                border-radius: 8px;
+                padding: 12px 16px;
+                font-size: 14px;
+                font-weight: bold;
+                border: 1px solid rgba(255, 255, 255, 0.2);
+            }}
+        """)
+        
+        # Position toast (stack them)
+        toast.adjustSize()
+        x = self.width() - toast.width() - 20
+        y = 20 + len(self.active_toasts) * (toast.height() + 10)
+        toast.move(x, y)
+        toast.show()
+        
+        # Add to active toasts
+        self.active_toasts.append(toast)
+        
+        # Animation
+        opacity_effect = QGraphicsOpacityEffect()
+        toast.setGraphicsEffect(opacity_effect)
+        
+        # Slide in from right
+        toast.move(self.width(), y)
+        
+        # Animate position and opacity
+        from PyQt5.QtCore import QPropertyAnimation, QParallelAnimationGroup, QPoint
+        
+        position_anim = QPropertyAnimation(toast, b"pos")
+        position_anim.setDuration(300)
+        position_anim.setStartValue(toast.pos())
+        position_anim.setEndValue(QPoint(x, y))
+        position_anim.setEasingCurve(QEasingCurve.OutCubic)
+        
+        opacity_anim = QPropertyAnimation(opacity_effect, b"opacity")
+        opacity_anim.setDuration(300)
+        opacity_anim.setStartValue(0)
+        opacity_anim.setEndValue(1)
+        
+        # Group animations
+        anim_group = QParallelAnimationGroup()
+        anim_group.addAnimation(position_anim)
+        anim_group.addAnimation(opacity_anim)
+        anim_group.start()
+        
+        # Auto hide after 3 seconds
+        QTimer.singleShot(3000, lambda: self.hide_toast(toast, opacity_effect))
+    
+    def hide_toast(self, toast, opacity_effect):
+        """Hide toast with fade out animation"""
+        from PyQt5.QtCore import QPropertyAnimation, QEasingCurve
+        
+        if toast in self.active_toasts:
+            self.active_toasts.remove(toast)
+        
+        fade_out = QPropertyAnimation(opacity_effect, b"opacity")
+        fade_out.setDuration(300)
+        fade_out.setStartValue(1)
+        fade_out.setEndValue(0)
+        fade_out.setEasingCurve(QEasingCurve.InCubic)
+        fade_out.finished.connect(toast.deleteLater)
+        fade_out.start()
+        
+        # Reposition remaining toasts
+        self.reposition_toasts()
+    
+    def reposition_toasts(self):
+        """Reposition remaining toasts after one is removed"""
+        for i, toast in enumerate(self.active_toasts):
+            new_y = 20 + i * (toast.height() + 10)
+            
+            from PyQt5.QtCore import QPropertyAnimation, QEasingCurve, QPoint
+            anim = QPropertyAnimation(toast, b"pos")
+            anim.setDuration(200)
+            anim.setStartValue(toast.pos())
+            anim.setEndValue(QPoint(toast.pos().x(), new_y))
+            anim.setEasingCurve(QEasingCurve.OutCubic)
+            anim.start()
+    
+    def start_basic_screen_sharing_timer(self):
+        """Start timer for basic screen sharing without WebRTC"""
+        if not hasattr(self, 'basic_sharing_timer'):
+            self.basic_sharing_timer = QTimer()
+            self.basic_sharing_timer.timeout.connect(self.capture_and_send_frame)
+        
+        # Send frames every 2 seconds for basic mode
+        self.basic_sharing_timer.start(2000)
+        self.logger.info("Basic screen sharing timer started")
+    
+    def stop_basic_screen_sharing_timer(self):
+        """Stop basic screen sharing timer"""
+        if hasattr(self, 'basic_sharing_timer'):
+            self.basic_sharing_timer.stop()
+            self.logger.info("Basic screen sharing timer stopped")
+    
+    def capture_and_send_frame(self):
+        """Capture and send frame for basic screen sharing"""
+        try:
+            frame_data = self.screen_capture.capture_frame_data()
+            if frame_data:
+                # Convert to base64 for transmission
+                import base64
+                frame_b64 = base64.b64encode(frame_data).decode('utf-8')
+                
+                # Send to all connected students
+                self.schedule_async_task(self.network_manager.broadcast_message("screen_frame", {
+                    "frame_data": frame_b64,
+                    "timestamp": time.time(),
+                    "format": "jpeg"
+                }))
+                
+        except Exception as e:
+            self.logger.error(f"Error capturing and sending frame: {e}")
     def show_toast(self, message: str, toast_type: str = "info"):
         """Show modern toast notification"""
         from PyQt5.QtWidgets import QLabel, QGraphicsOpacityEffect
@@ -368,8 +518,6 @@ class TeacherMainWindow(QMainWindow):
         self.qr_label.setScaledContents(True)  # Scale QR code properly
         qr_layout.addWidget(self.qr_label, 0, Qt.AlignCenter)
         
-        session_layout.addWidget(qr_container)
-        
         # Add Copy Session Details button
         copy_container = QWidget()
         copy_layout = QHBoxLayout(copy_container)
@@ -420,6 +568,137 @@ class TeacherMainWindow(QMainWindow):
         session_layout.addWidget(copy_container)
         
         left_layout.addWidget(session_group)
+    
+    def copy_session_details(self):
+        """Copy session details to clipboard"""
+        try:
+            details = f"""FocusClass Session Details:
+Session Code: {self.session_code_label.text()}
+Password: {self.password_label.text()}
+Teacher IP: {self.ip_label.text()}
+WebSocket Port: 8765
+HTTP Port: 8080
+
+Share this information with students to join the session."""
+            
+            from PyQt5.QtWidgets import QApplication
+            clipboard = QApplication.clipboard()
+            clipboard.setText(details)
+            
+            self.show_toast("✅ Session details copied to clipboard!", "success")
+            
+        except Exception as e:
+            self.logger.error(f"Error copying session details: {e}")
+            self.show_toast("❌ Failed to copy session details", "error")
+    
+    def view_session_details(self):
+        """Show detailed session information dialog"""
+        try:
+            from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit, QDialogButtonBox
+            
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Session Details")
+            dialog.setModal(True)
+            dialog.resize(450, 350)
+            
+            layout = QVBoxLayout(dialog)
+            
+            # Title
+            title = QLabel("📊 FocusClass Session Information")
+            title.setFont(QFont("Arial", 14, QFont.Bold))
+            title.setStyleSheet("color: #4A90E2; margin-bottom: 10px;")
+            layout.addWidget(title)
+            
+            # Session details in a text area
+            details_text = QTextEdit()
+            details_text.setReadOnly(True)
+            details_text.setMaximumHeight(200)
+            
+            session_info = f"""Session Code: {self.session_code_label.text()}
+Password: {self.password_label.text()}
+Teacher IP: {self.ip_label.text()}
+WebSocket Port: 8765
+HTTP Port: 8080
+Connected Students: {len(self.connected_students)}
+Status: {'Active' if self.session_active else 'Inactive'}
+Focus Mode: {'Enabled' if self.focus_mode_active else 'Disabled'}
+Screen Sharing: {'Active' if self.screen_sharing_active else 'Inactive'}
+
+Instructions for Students:
+1. Open FocusClass Student application
+2. Use manual connection with the above details
+3. Or scan the QR code displayed in the main window"""
+            
+            details_text.setPlainText(session_info)
+            details_text.setStyleSheet("""
+                QTextEdit {
+                    background-color: #f8f9fa;
+                    border: 1px solid #dee2e6;
+                    border-radius: 6px;
+                    padding: 10px;
+                    font-family: 'Courier New', monospace;
+                    font-size: 11px;
+                }
+            """)
+            layout.addWidget(details_text)
+            
+            # Buttons
+            button_layout = QHBoxLayout()
+            
+            copy_btn = QPushButton("📋 Copy All")
+            copy_btn.clicked.connect(lambda: self.copy_text_to_clipboard(session_info))
+            copy_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #17a2b8;
+                    color: white;
+                    border: none;
+                    padding: 8px 16px;
+                    border-radius: 4px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background-color: #138496;
+                }
+            """)
+            
+            close_btn = QPushButton("Close")
+            close_btn.clicked.connect(dialog.accept)
+            close_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #6c757d;
+                    color: white;
+                    border: none;
+                    padding: 8px 16px;
+                    border-radius: 4px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background-color: #5a6268;
+                }
+            """)
+            
+            button_layout.addWidget(copy_btn)
+            button_layout.addStretch()
+            button_layout.addWidget(close_btn)
+            
+            layout.addLayout(button_layout)
+            
+            dialog.exec_()
+            
+        except Exception as e:
+            self.logger.error(f"Error showing session details: {e}")
+            self.show_toast("❌ Failed to show session details", "error")
+    
+    def copy_text_to_clipboard(self, text):
+        """Copy given text to clipboard"""
+        try:
+            from PyQt5.QtWidgets import QApplication
+            clipboard = QApplication.clipboard()
+            clipboard.setText(text)
+            self.show_toast("✅ Copied to clipboard!", "success")
+        except Exception as e:
+            self.logger.error(f"Error copying to clipboard: {e}")
+            self.show_toast("❌ Failed to copy", "error")
         
         # Controls group
         controls_group = QGroupBox("🎮 Session Controls")
@@ -655,6 +934,83 @@ class TeacherMainWindow(QMainWindow):
         screen_btn_layout.addWidget(self.start_sharing_btn)
         screen_btn_layout.addWidget(self.stop_sharing_btn)
         controls_layout.addLayout(screen_btn_layout)
+        
+    def start_screen_sharing(self):
+        """Start screen sharing"""
+        self.schedule_async_task(self._start_screen_sharing_async())
+    
+    async def _start_screen_sharing_async(self):
+        """Async screen sharing start"""
+        try:
+            if self.screen_sharing_active:
+                self.show_toast("⚠️ Screen sharing already active", "warning")
+                return
+            
+            # Start screen capture
+            monitor_index = 0  # Primary monitor
+            quality = "medium"  # Default quality
+            
+            success = self.screen_capture.start_capture(monitor_index, quality)
+            
+            if success:
+                # Notify students about screen sharing start
+                await self.network_manager.broadcast_message("screen_sharing", {
+                    "action": "start",
+                    "quality": quality,
+                    "monitor": monitor_index
+                })
+                
+                # Start sending frames
+                self.start_basic_screen_sharing_timer()
+                
+                # Update UI
+                self.screen_sharing_active = True
+                self.start_sharing_btn.setEnabled(False)
+                self.stop_sharing_btn.setEnabled(True)
+                
+                self.show_toast("📺 Screen sharing started", "success")
+                self.logger.info("Screen sharing started")
+                
+            else:
+                self.show_toast("❌ Failed to start screen sharing", "error")
+                
+        except Exception as e:
+            self.logger.error(f"Error starting screen sharing: {e}")
+            self.show_toast(f"❌ Error starting screen sharing: {str(e)}", "error")
+    
+    def stop_screen_sharing(self):
+        """Stop screen sharing"""
+        self.schedule_async_task(self._stop_screen_sharing_async())
+    
+    async def _stop_screen_sharing_async(self):
+        """Async screen sharing stop"""
+        try:
+            if not self.screen_sharing_active:
+                self.show_toast("⚠️ Screen sharing not active", "warning")
+                return
+            
+            # Stop frame timer
+            self.stop_basic_screen_sharing_timer()
+            
+            # Stop screen capture
+            self.screen_capture.stop_capture()
+            
+            # Notify students
+            await self.network_manager.broadcast_message("screen_sharing", {
+                "action": "stop"
+            })
+            
+            # Update UI
+            self.screen_sharing_active = False
+            self.start_sharing_btn.setEnabled(True)
+            self.stop_sharing_btn.setEnabled(False)
+            
+            self.show_toast("🚫 Screen sharing stopped", "info")
+            self.logger.info("Screen sharing stopped")
+            
+        except Exception as e:
+            self.logger.error(f"Error stopping screen sharing: {e}")
+            self.show_toast(f"❌ Error stopping screen sharing: {str(e)}", "error")
     
     def create_right_panel(self):
         """Create right student panel"""

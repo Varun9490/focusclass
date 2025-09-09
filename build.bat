@@ -1,46 +1,40 @@
 @echo off
-REM FocusClass Build Script for Windows
-REM This script builds both Teacher.exe and Student.exe
+REM ============================================================================
+REM  FocusClass Build Script
+REM
+REM  This script automates the process of building the FocusClass application
+REM  for production. It ensures all necessary steps are taken to create a
+REM  clean, reliable executable.
+REM
+REM  Usage:
+REM    build.bat
+REM
+REM ============================================================================
 
-echo FocusClass Build Script
-echo =====================
+echo [INFO] Setting up build environment...
+set "PYTHON_EXE=python"
+set "SCRIPT_DIR=%~dp0"
+cd /d "%SCRIPT_DIR%"
 
-REM Check if Python is installed
-python --version >nul 2>&1
-if errorlevel 1 (
-    echo Error: Python is not installed or not in PATH
-    echo Please install Python 3.8 or later and try again
-    pause
-    exit /b 1
+echo [INFO] Verifying Python installation...
+%PYTHON_EXE% --version >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [ERROR] Python is not installed or not found in PATH.
+    echo [ERROR] Please install Python 3.8+ and add it to your system's PATH.
+    goto :eof
 )
 
-REM Check if pip is available
-python -m pip --version >nul 2>&1
-if errorlevel 1 (
-    echo Error: pip is not available
-    echo Please ensure pip is installed with Python
-    pause
-    exit /b 1
+echo [INFO] Starting FocusClass production build...
+
+REM Run the main build script
+%PYTHON_EXE% build_production.py
+
+if %errorlevel% neq 0 (
+    echo [ERROR] Build failed. Please check the logs above for details.
+    goto :eof
 )
 
-echo Python detected. Starting build process...
+echo [SUCCESS] Build process completed successfully.
+echo [INFO] The executable can be found in the 'dist' directory.
 
-REM Install PyInstaller if not already installed
-echo Installing PyInstaller...
-python -m pip install pyinstaller
-
-REM Run the build script
-echo Running Python build script...
-python build.py
-
-if errorlevel 1 (
-    echo Build failed! Check error messages above.
-    pause
-    exit /b 1
-)
-
-echo.
-echo Build completed successfully!
-echo Check the 'dist' directory for the executable files.
-echo.
 pause

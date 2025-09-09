@@ -167,7 +167,6 @@ class VideoDisplayWidget(QWidget):
         
         # Instructions
         self.instruction_text = "Waiting for teacher to start screen sharing..."
-    
     def set_frame(self, frame_data):
         """Set video frame to display"""
         self.current_frame = frame_data
@@ -459,9 +458,81 @@ class StudentMainWindow(QMainWindow):
         self.network_manager.register_message_handler("force_disconnect", self.handle_force_disconnect)
         self.network_manager.register_message_handler("screen_request", self.handle_screen_request)
         self.network_manager.register_message_handler("teacher_stream", self.handle_teacher_stream)
+        # Additional handlers to support basic (non-WebRTC) screen sharing and welcome/session info
+        # These were missing and caused "No handler for message type: welcome/screen_frame" warnings
+        self.network_manager.register_message_handler("welcome", self.handle_welcome)
+        self.network_manager.register_message_handler("screen_sharing", self.handle_screen_sharing)
+        self.network_manager.register_message_handler("screen_frame", self.handle_screen_frame)
         
         # Connection handlers
         self.network_manager.register_connection_handler("disconnection", self.handle_disconnection)
+    
+    async def handle_welcome(self, client_id: str, data: Dict[str, Any]):
+        """Handle welcome message from teacher - update session info UI"""
+        try:
+            # Teacher may send session information in welcome payload
+            session_code = data.get("session_code") or data.get("session") or self.session_code
+            teacher_ip = data.get("teacher_ip") or getattr(self, 'teacher_ip', '')
+            password = data.get("password")
+            
+            if session_code:
+                self.session_code = session_code
+                self.control_panel.set_connection_status(self.connected, teacher_ip, session_code)
+            
+            # If the teacher sent a password or ip, update internal fields
+            if teacher_ip:
+                self.teacher_ip = teacher_ip
+            if password:
+                self.control_panel.add_status_message("Received session details from teacher")
+            
+        except Exception as e:
+            self.logger.error(f"Error handling welcome message: {e}")
+    
+    async def handle_screen_sharing(self, client_id: str, data: Dict[str, Any]):
+        """Handle screen sharing control messages (start/stop)"""
+        try:
+            action = data.get("action", "start")
+            if action == "start":
+                self.video_display.instruction_text = "Teacher started screen sharing..."
+                self.video_display.set_connection_status(True, "Receiving screen")
+                self.control_panel.add_status_message("Teacher started screen sharing")
+            else:
+                # Stop sharing
+                self.video_display.set_connection_status(False, "Teacher stopped sharing")
+                self.video_display.current_frame = None
+                self.video_display.update()
+                self.control_panel.add_status_message("Teacher stopped screen sharing")
+        
+        except Exception as e:
+            self.logger.error(f"Error handling screen_sharing message: {e}")
+    
+    async def handle_screen_frame(self, client_id: str, data: Dict[str, Any]):
+        """Handle incoming screen frame (base64-encoded PNG/JPEG) and display it"""
+        try:
+            frame_b64 = data.get("frame") or data.get("image")
+            if not frame_b64:
+                self.logger.warning("Screen frame received with no data")
+                return
+            
+            import base64
+            from PyQt5.QtGui import QPixmap
+            
+            # Some implementations send frame as bytes, some as base64 string
+            if isinstance(frame_b64, (bytes, bytearray)):
+                raw = bytes(frame_b64)
+            else:
+                raw = base64.b64decode(frame_b64)
+            
+            pixmap = QPixmap()
+            if pixmap.loadFromData(raw):
+                # Scale pixmap to fit widget while preserving aspect ratio
+                scaled = pixmap.scaled(self.video_display.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                self.video_display.set_frame(scaled)
+            else:
+                self.logger.error("Failed to load pixmap from incoming frame data")
+        
+        except Exception as e:
+            self.logger.error(f"Error handling screen_frame: {e}")
     
     def init_keystroke_monitoring(self):
         """Initialize keystroke monitoring"""
