@@ -77,6 +77,11 @@ class TeacherMainWindow(QMainWindow):
         self.charging_monitoring = True
         self.battery_threshold = 20  # Alert when battery below 20%
         
+        # Violation throttling to prevent spam
+        self.violation_throttle = {}  # client_id -> {last_time, count}
+        self.violation_cooldown = 5.0  # 5 seconds between same violation types
+        self.max_violations_per_minute = 10  # Maximum violations per minute per student
+        
         # Setup UI
         self.setup_ui()
         self.setup_timers()
@@ -246,8 +251,8 @@ class TeacherMainWindow(QMainWindow):
             from PIL import Image
             
             with mss.mss() as sct:
-                # Get primary monitor (monitor 1 in MSS, 0 is all monitors)
-                monitor = sct.monitors[1]
+                # Get monitor based on selected index (use monitor 1 for primary, or the selected monitor)
+                monitor = sct.monitors[monitor_index + 1] if monitor_index + 1 < len(sct.monitors) else sct.monitors[1]
                 
                 # Capture screen
                 screenshot = sct.grab(monitor)
@@ -1154,20 +1159,113 @@ Share this information with students to join the session."""
         controls_layout.addLayout(screen_btn_layout)
         
     def start_screen_sharing(self):
-        """Start screen sharing"""
-        self.schedule_async_task(self._start_screen_sharing_async())
+        """Start screen sharing with monitor selection"""
+        self.show_screen_selection_dialog()
     
-    async def _start_screen_sharing_async(self):
-        """Async screen sharing start"""
+    def show_screen_selection_dialog(self):
+        """Show screen selection dialog for teacher"""
+        try:
+            from PyQt5.QtWidgets import QDialog, QDialogButtonBox, QRadioButton, QButtonGroup
+            
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Select Screen to Share")
+            dialog.setModal(True)
+            dialog.resize(400, 300)
+            
+            layout = QVBoxLayout(dialog)
+            
+            # Title
+            title = QLabel("📺 Choose Screen/Monitor to Share")
+            title.setFont(QFont("Arial", 14, QFont.Bold))
+            title.setStyleSheet("color: #4A90E2; margin-bottom: 15px;")
+            title.setAlignment(Qt.AlignCenter)
+            layout.addWidget(title)
+            
+            # Monitor selection group
+            monitor_group = QGroupBox("Available Monitors")
+            monitor_layout = QVBoxLayout(monitor_group)
+            
+            self.screen_button_group = QButtonGroup()
+            
+            # Get available monitors from screen capture
+            monitors = self.screen_capture.get_monitors()
+            
+            for i, monitor in enumerate(monitors):
+                # Create radio button for each monitor
+                radio_btn = QRadioButton(f"Monitor {i+1}: {monitor['width']}x{monitor['height']}")
+                if i == 0:  # Select first monitor by default
+                    radio_btn.setChecked(True)
+                
+                self.screen_button_group.addButton(radio_btn, i)
+                monitor_layout.addWidget(radio_btn)
+            
+            layout.addWidget(monitor_group)
+            
+            # Quality selection
+            quality_group = QGroupBox("Quality Settings")
+            quality_layout = QVBoxLayout(quality_group)
+            
+            self.quality_button_group = QButtonGroup()
+            
+            quality_options = [
+                ("Low (10fps, 50% scale)", "low"),
+                ("Medium (15fps, 75% scale)", "medium"),
+                ("High (20fps, 100% scale)", "high")
+            ]
+            
+            for i, (label, value) in enumerate(quality_options):
+                radio_btn = QRadioButton(label)
+                if value == "medium":  # Select medium by default
+                    radio_btn.setChecked(True)
+                
+                self.quality_button_group.addButton(radio_btn, i)
+                quality_layout.addWidget(radio_btn)
+            
+            layout.addWidget(quality_group)
+            
+            # Buttons
+            button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+            button_box.accepted.connect(lambda: self.start_selected_screen_sharing(dialog))
+            button_box.rejected.connect(dialog.reject)
+            layout.addWidget(button_box)
+            
+            dialog.exec_()
+            
+        except Exception as e:
+            self.logger.error(f"Error showing screen selection dialog: {e}")
+            # Fallback to default screen sharing
+            self.schedule_async_task(self._start_screen_sharing_async())
+    
+    def start_selected_screen_sharing(self, dialog):
+        """Start screen sharing with selected options"""
+        try:
+            # Get selected monitor
+            selected_monitor = self.screen_button_group.checkedId()
+            if selected_monitor == -1:
+                selected_monitor = 0  # Default to first monitor
+            
+            # Get selected quality
+            selected_quality_id = self.quality_button_group.checkedId()
+            quality_map = {0: "low", 1: "medium", 2: "high"}
+            selected_quality = quality_map.get(selected_quality_id, "medium")
+            
+            dialog.accept()
+            
+            # Start screen sharing with selected options
+            self.schedule_async_task(self._start_screen_sharing_async(selected_monitor, selected_quality))
+            
+        except Exception as e:
+            self.logger.error(f"Error starting selected screen sharing: {e}")
+            dialog.reject()
+    
+    async def _start_screen_sharing_async(self, monitor_index=0, quality="medium"):
+        """Async screen sharing start with optional monitor and quality selection"""
         try:
             if self.screen_sharing_active:
                 self.show_toast("⚠️ Screen sharing already active", "warning")
                 return
             
-            # Start screen capture
-            monitor_index = 0  # Primary monitor
-            quality = "medium"  # Default quality
-            
+            # Start screen capture with selected options
             success = self.screen_capture.start_capture(monitor_index, quality)
             
             if success:
@@ -1186,8 +1284,8 @@ Share this information with students to join the session."""
                 self.start_sharing_btn.setEnabled(False)
                 self.stop_sharing_btn.setEnabled(True)
                 
-                self.show_toast("📺 Screen sharing started", "success")
-                self.logger.info("Screen sharing started")
+                self.show_toast(f"📺 Screen sharing started (Monitor {monitor_index+1}, {quality.title()} quality)", "success")
+                self.logger.info(f"Screen sharing started - Monitor: {monitor_index}, Quality: {quality}")
                 
             else:
                 self.show_toast("❌ Failed to start screen sharing", "error")
@@ -2128,8 +2226,8 @@ Share this information with students to join the session."""
             # TODO: Verify session and password
             # For now, accept all connections
             
-            # Get student IP
-            student_ip = "127.0.0.1"  # Placeholder
+            # Get student IP from network manager
+            student_ip = self.network_manager.get_client_ip(client_id)
             
             # Add student to database
             student_db_id = await self.db_manager.add_student(
@@ -2294,13 +2392,40 @@ Share this information with students to join the session."""
             self.logger.error(f"Error handling malicious activity: {e}")
     
     async def log_malicious_activity(self, client_id: str, activity_type: str, description: str, severity: str = "medium"):
-        """Log malicious activity"""
+        """Log malicious activity with throttling to prevent spam"""
         try:
             if client_id not in self.connected_students:
                 return
             
             student = self.connected_students[client_id]
-            timestamp = time.time()
+            current_time = time.time()
+            
+            # Create throttle key for this client and activity type
+            throttle_key = f"{client_id}_{activity_type}"
+            
+            # Check if we should throttle this violation
+            if throttle_key in self.violation_throttle:
+                last_time = self.violation_throttle[throttle_key]['last_time']
+                count = self.violation_throttle[throttle_key]['count']
+                
+                # If within cooldown period, check rate limiting
+                if current_time - last_time < self.violation_cooldown:
+                    if count >= 3:  # Allow max 3 violations within cooldown
+                        # Rate limited - just update count but don't log to UI
+                        self.violation_throttle[throttle_key]['count'] += 1
+                        # Still log to database but silently
+                        if hasattr(self, 'db_manager') and self.session_id:
+                            await self.db_manager.log_violation(
+                                self.session_id, student.get("db_id"), activity_type, 
+                                f"{description} (throttled x{count})"
+                            )
+                        return
+                else:
+                    # Reset count after cooldown period
+                    self.violation_throttle[throttle_key] = {'last_time': current_time, 'count': 1}
+            else:
+                # First violation of this type for this client
+                self.violation_throttle[throttle_key] = {'last_time': current_time, 'count': 1}
             
             # Store in local malicious activities
             if client_id not in self.malicious_activities:
@@ -2310,32 +2435,49 @@ Share this information with students to join the session."""
                 "type": activity_type,
                 "description": description,
                 "severity": severity,
-                "timestamp": timestamp
+                "timestamp": current_time
             }
             
             self.malicious_activities[client_id].append(activity)
             
-            # Add to UI
-            timestamp_str = time.strftime("%H:%M:%S", time.localtime(timestamp))
+            # Keep only last 50 activities per student to prevent memory bloat
+            if len(self.malicious_activities[client_id]) > 50:
+                self.malicious_activities[client_id] = self.malicious_activities[client_id][-50:]
+            
+            # Add to UI with throttling indicator if applicable
+            timestamp_str = time.strftime("%H:%M:%S", time.localtime(current_time))
             severity_color = {
                 "low": "#28a745",
                 "medium": "#ffc107", 
                 "high": "#dc3545"
             }.get(severity, "#6c757d")
             
-            log_entry = f"""<span style="color: {severity_color}; font-weight: bold;">[{timestamp_str}] {student.get('name', 'Unknown')}</span><br>
+            throttle_info = ""
+            if throttle_key in self.violation_throttle and self.violation_throttle[throttle_key]['count'] > 1:
+                throttle_info = f" (x{self.violation_throttle[throttle_key]['count']})"
+            
+            log_entry = f"""<span style="color: {severity_color}; font-weight: bold;">[{timestamp_str}] {student.get('name', 'Unknown')}{throttle_info}</span><br>
             <b>Type:</b> {activity_type}<br>
             <b>Severity:</b> {severity.upper()}<br>
             <b>Details:</b> {description}<br><hr>"""
             
             self.malicious_list.append(log_entry)
             
-            # Log to database
-            await self.db_manager.log_violation(
-                self.session_id, student["db_id"], activity_type, description
-            )
+            # Keep malicious list manageable (last 100 entries)
+            if self.malicious_list.document().blockCount() > 100:
+                cursor = self.malicious_list.textCursor()
+                cursor.movePosition(cursor.Start)
+                cursor.movePosition(cursor.Down, cursor.KeepAnchor, 20)  # Remove first 20 entries
+                cursor.removeSelectedText()
             
-            self.logger.warning(f"Malicious activity from {student.get('name')}: {activity_type} - {description}")
+            # Log to database
+            if hasattr(self, 'db_manager') and self.session_id:
+                await self.db_manager.log_violation(
+                    self.session_id, student.get("db_id"), activity_type, 
+                    f"{description}{throttle_info}"
+                )
+            
+            self.logger.warning(f"Malicious activity from {student.get('name')}: {activity_type} - {description}{throttle_info}")
             
         except Exception as e:
             self.logger.error(f"Error logging malicious activity: {e}")
