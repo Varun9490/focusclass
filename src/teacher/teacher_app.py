@@ -788,9 +788,102 @@ class TeacherMainWindow(QMainWindow):
         
         copy_layout.addWidget(self.copy_session_btn)
         copy_layout.addWidget(self.view_details_btn)
-        session_layout.addWidget(copy_container)
+        copy_container.setLayout(copy_layout)
         
+        qr_layout.addWidget(copy_container)
+        session_layout.addWidget(qr_container)
         left_layout.addWidget(session_group)
+        
+        # Controls group
+        controls_group = QGroupBox("🎮 Session Controls")
+        controls_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                font-size: 14px;
+                border: 2px solid #ddd;
+                border-radius: 10px;
+                margin-top: 10px;
+                padding-top: 15px;
+                background-color: rgba(255, 255, 255, 0.95);
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 10px 0 10px;
+                color: #333;
+            }
+        """)
+        controls_layout = QVBoxLayout(controls_group)
+        controls_layout.setSpacing(15)
+        
+        # Create controls section
+        self.create_controls_section(controls_layout)
+        
+        # Add controls group to left layout
+        left_layout.addWidget(controls_group)
+        
+        # Violation log
+        violation_group = QGroupBox("⚠️ Violation Log")
+        violation_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                font-size: 14px;
+                border: 2px solid #ddd;
+                border-radius: 10px;
+                margin-top: 10px;
+                padding-top: 15px;
+                background-color: rgba(255, 255, 255, 0.95);
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 10px 0 10px;
+                color: #333;
+            }
+        """)
+        violation_layout = QVBoxLayout(violation_group)
+        
+        log_header = QHBoxLayout()
+        log_title = QLabel("Recent Violations")
+        self.clear_log_btn = QPushButton("🗑️ Clear")
+        self.clear_log_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #6c757d;
+                color: white;
+                border: none;
+                padding: 5px 10px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #5a6268;
+            }
+        """)
+        self.clear_log_btn.clicked.connect(self.clear_violation_log)
+        
+        log_header.addWidget(log_title)
+        log_header.addStretch()
+        log_header.addWidget(self.clear_log_btn)
+        violation_layout.addLayout(log_header)
+        
+        self.violation_log = QTextEdit()
+        self.violation_log.setReadOnly(True)
+        self.violation_log.setMaximumHeight(150)
+        self.violation_log.setStyleSheet("""
+            QTextEdit {
+                background-color: #f8f9fa;
+                border: 1px solid #dee2e6;
+                border-radius: 4px;
+                padding: 8px;
+                font-family: 'Courier New', monospace;
+                font-size: 11px;
+            }
+        """)
+        violation_layout.addWidget(self.violation_log)
+        
+        left_layout.addWidget(violation_group)
+        left_layout.addStretch()
+        
+        return left_panel
     
     def copy_session_details(self):
         """Copy session details to clipboard"""
@@ -922,97 +1015,6 @@ Share this information with students to join the session."""
         except Exception as e:
             self.logger.error(f"Error copying to clipboard: {e}")
             self.show_toast("❌ Failed to copy", "error")
-        
-        # Controls group
-        controls_group = QGroupBox("🎮 Session Controls")
-        controls_group.setStyleSheet("""
-            QGroupBox {
-                font-weight: bold;
-                font-size: 14px;
-                border: 2px solid #ddd;
-                border-radius: 10px;
-                margin-top: 10px;
-                padding-top: 15px;
-                background-color: rgba(255, 255, 255, 0.95);
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 10px 0 10px;
-                color: #333;
-            }
-        """)
-        controls_layout = QVBoxLayout(controls_group)
-        controls_layout.setSpacing(15)
-        
-        # Create controls section
-        self.create_controls_section(controls_layout)
-        
-        # Add controls group to left layout
-        left_layout.addWidget(controls_group)
-        
-        # Violation log
-        violation_group = QGroupBox("⚠️ Violation Log")
-        violation_group.setStyleSheet("""
-            QGroupBox {
-                font-weight: bold;
-                font-size: 14px;
-                border: 2px solid #ddd;
-                border-radius: 10px;
-                margin-top: 10px;
-                padding-top: 15px;
-                background-color: rgba(255, 255, 255, 0.95);
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 10px 0 10px;
-                color: #333;
-            }
-        """)
-        violation_layout = QVBoxLayout(violation_group)
-        
-        log_header = QHBoxLayout()
-        log_title = QLabel("Recent Violations")
-        self.clear_log_btn = QPushButton("🗑️ Clear")
-        self.clear_log_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #6c757d;
-                color: white;
-                border: none;
-                padding: 5px 10px;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #5a6268;
-            }
-        """)
-        self.clear_log_btn.clicked.connect(self.clear_violation_log)
-        
-        log_header.addWidget(log_title)
-        log_header.addStretch()
-        log_header.addWidget(self.clear_log_btn)
-        violation_layout.addLayout(log_header)
-        
-        self.violation_log = QTextEdit()
-        self.violation_log.setReadOnly(True)
-        self.violation_log.setMaximumHeight(150)
-        self.violation_log.setStyleSheet("""
-            QTextEdit {
-                background-color: #f8f9fa;
-                border: 1px solid #dee2e6;
-                border-radius: 4px;
-                padding: 8px;
-                font-family: 'Courier New', monospace;
-                font-size: 11px;
-            }
-        """)
-        violation_layout.addWidget(self.violation_log)
-        
-        left_layout.addWidget(violation_group)
-        left_layout.addStretch()
-        
-        return left_panel
     
     def create_info_card(self, title: str, value: str, color: str):
         """Create an information card widget"""
