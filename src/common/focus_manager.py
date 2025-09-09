@@ -387,6 +387,9 @@ class FocusManager:
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     continue
                     
+        except Exception as e:
+            self.logger.error(f"Error checking browser violations: {e}")
+                    
     async def _disable_task_switching(self):
         """Disable task switching via registry and other methods"""
         try:
@@ -500,6 +503,9 @@ class FocusManager:
             
         except Exception as e:
             self.logger.error(f"Error restoring Windows settings: {e}")
+    
+    async def _install_window_hook(self):
+        """Install window event hook"""
         try:
             def window_hook_proc(hWinEventHook, event, hwnd, idObject, idChild, dwEventThread, dwmsEventTime):
                 if event == win32con.EVENT_SYSTEM_FOREGROUND:

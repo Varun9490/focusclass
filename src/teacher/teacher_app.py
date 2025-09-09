@@ -1333,6 +1333,160 @@ Share this information with students to join the session."""
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
         
+        # Student list header
+        header_layout = QHBoxLayout()
+        students_title = QLabel("👥 Connected Students")
+        students_title.setFont(QFont("Arial", 14, QFont.Bold))
+        students_title.setStyleSheet("color: #333; margin: 10px 0;")
+        
+        self.student_count_label = QLabel("(0)")
+        self.student_count_label.setFont(QFont("Arial", 12, QFont.Bold))
+        self.student_count_label.setStyleSheet("color: #666;")
+        
+        header_layout.addWidget(students_title)
+        header_layout.addWidget(self.student_count_label)
+        header_layout.addStretch()
+        
+        # Refresh button
+        refresh_btn = QPushButton("🔄 Refresh")
+        refresh_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #17a2b8;
+                color: white;
+                border: none;
+                padding: 6px 12px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #138496;
+            }
+        """)
+        refresh_btn.clicked.connect(self.refresh_student_list)
+        header_layout.addWidget(refresh_btn)
+        
+        right_layout.addLayout(header_layout)
+        
+        # Update performance stats here to initialize student table
+        try:
+            # Update network label with current info
+            if hasattr(self, 'network_label'):
+                local_ip = get_local_ip()
+                self.network_label.setText(f"IP: {local_ip}")
+            
+        except Exception as e:
+            self.logger.error(f"Error updating performance stats: {e}")
+        
+        # Student table with enhanced columns
+        self.student_table = QTableWidget()
+        self.student_table.setColumnCount(8)
+        self.student_table.setHorizontalHeaderLabels([
+            "Name", "IP Address", "Status", "Battery", "Violations", "Keystrokes", "Focus", "Actions"
+        ])
+        self.student_table.horizontalHeader().setStretchLastSection(True)
+        self.student_table.setStyleSheet("""
+            QTableWidget {
+                background-color: white;
+                border: 1px solid #ddd;
+                border-radius: 8px;
+            }
+            QTableWidget::item {
+                padding: 8px;
+                border-bottom: 1px solid #eee;
+            }
+            QTableWidget::item:selected {
+                background-color: #e3f2fd;
+            }
+            QHeaderView::section {
+                background-color: #f5f5f5;
+                padding: 8px;
+                border: none;
+                font-weight: bold;
+            }
+        """)
+        
+        right_layout.addWidget(self.student_table)
+        
+        # Malicious activity panel
+        malicious_group = QGroupBox("🚨 Malicious Activities")
+        malicious_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                font-size: 14px;
+                border: 2px solid #ddd;
+                border-radius: 10px;
+                margin-top: 10px;
+                padding-top: 15px;
+                background-color: rgba(255, 255, 255, 0.95);
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 10px 0 10px;
+                color: #333;
+            }
+        """)
+        malicious_layout = QVBoxLayout(malicious_group)
+        
+        self.malicious_list = QTextEdit()
+        self.malicious_list.setReadOnly(True)
+        self.malicious_list.setMaximumHeight(120)
+        self.malicious_list.setStyleSheet("""
+            QTextEdit {
+                background-color: #fff3cd;
+                border: 1px solid #ffeeba;
+                border-radius: 4px;
+                padding: 8px;
+                font-family: 'Courier New', monospace;
+                font-size: 11px;
+            }
+        """)
+        malicious_layout.addWidget(self.malicious_list)
+        
+        # Malicious activity controls
+        malicious_controls = QHBoxLayout()
+        self.clear_malicious_btn = QPushButton("🗑️ Clear Activities")
+        self.clear_malicious_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #6c757d;
+                color: white;
+                border: none;
+                padding: 6px 12px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #5a6268;
+            }
+        """)
+        
+        self.export_report_btn = QPushButton("📄 Export Report")
+        self.export_report_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #007bff;
+                color: white;
+                border: none;
+                padding: 6px 12px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #0056b3;
+            }
+        """)
+        
+        self.clear_malicious_btn.clicked.connect(self.clear_malicious_activities)
+        self.export_report_btn.clicked.connect(self.export_activity_report)
+        
+        malicious_controls.addWidget(self.clear_malicious_btn)
+        malicious_controls.addWidget(self.export_report_btn)
+        malicious_controls.addStretch()
+        malicious_layout.addLayout(malicious_controls)
+        
+        right_layout.addWidget(malicious_group)
+        
+        return right_panel
+        
     def refresh_student_list(self):
         """Refresh the student list display with real IP addresses and actions"""
         try:
@@ -1762,69 +1916,6 @@ Share this information with students to join the session."""
             
         except Exception as e:
             self.logger.error(f"Error updating performance stats: {e}")
-        
-        # Student table with enhanced columns
-        self.student_table = QTableWidget()
-        self.student_table.setColumnCount(8)
-        self.student_table.setHorizontalHeaderLabels([
-            "Name", "IP Address", "Status", "Battery", "Violations", "Keystrokes", "Focus", "Actions"
-        ])
-        self.student_table.horizontalHeader().setStretchLastSection(True)
-        self.student_table.setStyleSheet("""
-            QTableWidget {
-                background-color: white;
-                border: 1px solid #ddd;
-                border-radius: 8px;
-            }
-            QTableWidget::item {
-                padding: 8px;
-                border-bottom: 1px solid #eee;
-            }
-            QTableWidget::item:selected {
-                background-color: #e3f2fd;
-            }
-            QHeaderView::section {
-                background-color: #f5f5f5;
-                padding: 8px;
-                border: none;
-                font-weight: bold;
-            }
-        """)
-        
-        right_layout.addWidget(self.student_table)
-        
-        # Malicious activity panel
-        malicious_group = QGroupBox("Malicious Activities")
-        malicious_layout = QVBoxLayout(malicious_group)
-        
-        self.malicious_list = QTextEdit()
-        self.malicious_list.setReadOnly(True)
-        self.malicious_list.setMaximumHeight(120)
-        self.malicious_list.setStyleSheet("""
-            QTextEdit {
-                background-color: #fff3cd;
-                border: 1px solid #ffeeba;
-                border-radius: 4px;
-                padding: 8px;
-            }
-        """)
-        malicious_layout.addWidget(self.malicious_list)
-        
-        # Malicious activity controls
-        malicious_controls = QHBoxLayout()
-        self.clear_malicious_btn = QPushButton("Clear Activities")
-        self.export_report_btn = QPushButton("Export Report")
-        self.clear_malicious_btn.clicked.connect(self.clear_malicious_activities)
-        self.export_report_btn.clicked.connect(self.export_activity_report)
-        
-        malicious_controls.addWidget(self.clear_malicious_btn)
-        malicious_controls.addWidget(self.export_report_btn)
-        malicious_controls.addStretch()
-        malicious_layout.addLayout(malicious_controls)
-        
-        right_layout.addWidget(malicious_group)
-        
-        return right_panel
     
     def setup_timers(self):
         """Setup periodic timers"""

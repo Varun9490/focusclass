@@ -11,7 +11,14 @@ from typing import Optional, Callable, Tuple, List
 import io
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
-import cv2
+
+# Optional OpenCV import
+try:
+    import cv2
+    CV2_AVAILABLE = True
+except ImportError:
+    CV2_AVAILABLE = False
+    print("Warning: cv2 not available. Some advanced features may be disabled.")
 
 # Screen capture
 import mss
