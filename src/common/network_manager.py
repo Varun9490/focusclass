@@ -424,10 +424,14 @@ class NetworkManager:
             raise ValueError("This method is only for student instances")
         
         try:
-            # First, authenticate via HTTP API
-            join_url = f"http://{teacher_ip}:{self.http_port}/api/join"
+            self.logger.info(f"Attempting to connect to teacher at {teacher_ip}")
             
-            async with aiohttp.ClientSession() as session:
+            # First, authenticate via HTTP API with timeout
+            join_url = f"http://{teacher_ip}:{self.http_port}/api/join"
+            self.logger.info(f"Connecting to HTTP API: {join_url}")
+            
+            timeout = aiohttp.ClientTimeout(total=10)  # 10 second timeout
+            async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(join_url, json={
                     "student_name": student_name,
                     "password": password,
@@ -435,31 +439,49 @@ class NetworkManager:
                 }) as response:
                     if response.status != 200:
                         result = await response.json()
-                        self.logger.error(f"Join request failed: {result.get('error')}")
+                        error_msg = result.get('error', 'Unknown error')
+                        self.logger.error(f"Join request failed: {error_msg}")
                         return False
+                    else:
+                        self.logger.info("HTTP authentication successful")
             
-            # Connect via WebSocket
+            # Connect via WebSocket with timeout
             ws_url = f"ws://{teacher_ip}:{self.websocket_port}"
-            self.websocket_client = await websockets.connect(ws_url)
+            self.logger.info(f"Connecting to WebSocket: {ws_url}")
+            
+            self.websocket_client = await asyncio.wait_for(
+                websockets.connect(ws_url), timeout=10.0
+            )
+            self.logger.info("WebSocket connection established")
             
             # Send authentication
-            await self.websocket_client.send(json.dumps({
+            auth_message = {
                 "type": "authenticate",
                 "data": {
                     "student_name": student_name,
                     "password": password,
                     "session_code": session_code
                 }
-            }))
+            }
+            await self.websocket_client.send(json.dumps(auth_message))
+            self.logger.info("Authentication message sent")
             
             # Start message handling
             asyncio.create_task(self._handle_client_messages())
             
-            self.logger.info(f"Connected to teacher at {teacher_ip}")
+            self.logger.info(f"Successfully connected to teacher at {teacher_ip}")
             return True
             
+        except asyncio.TimeoutError:
+            self.logger.error(f"Connection timeout: Unable to reach teacher at {teacher_ip}")
+            return False
+        except aiohttp.ClientConnectorError as e:
+            self.logger.error(f"Network connection error: {e}")
+            self.logger.error(f"Please check if teacher is running and IP address {teacher_ip} is correct")
+            return False
         except Exception as e:
             self.logger.error(f"Failed to connect to teacher: {e}")
+            self.logger.error(f"Connection details - IP: {teacher_ip}, Session: {session_code}")
             return False
     
     async def _handle_client_messages(self):

@@ -639,6 +639,9 @@ class StudentMainWindow(QMainWindow):
             self.control_panel.add_status_message("Connecting to teacher...")
             self.video_display.set_connection_status(False, "Connecting...")
             
+            # Test basic connectivity first
+            self.control_panel.add_status_message(f"Testing connection to {teacher_ip}...")
+            
             # Attempt connection
             success = await self.network_manager.connect_to_teacher(
                 teacher_ip, session_code, password, student_name
@@ -652,13 +655,29 @@ class StudentMainWindow(QMainWindow):
                 self.control_panel.add_status_message("Connected successfully!")
                 self.logger.info(f"Connected to teacher at {teacher_ip}")
             else:
-                QMessageBox.critical(self, "Connection Failed", 
-                                   "Failed to connect to teacher. Please check your connection details.")
+                # Provide detailed error message
+                error_msg = (
+                    f"Failed to connect to teacher at {teacher_ip}\n\n"
+                    "Possible causes:\n"
+                    "• Teacher has not started a session\n"
+                    "• Incorrect IP address or session details\n"
+                    "• Firewall blocking connection\n"
+                    "• Not on the same network\n\n"
+                    "Please check the connection details and try again."
+                )
+                
+                QMessageBox.critical(self, "Connection Failed", error_msg)
+                self.control_panel.add_status_message("Connection failed - see error dialog")
                 self.show_connection_dialog()
                 
         except Exception as e:
             self.logger.error(f"Connection error: {e}")
-            QMessageBox.critical(self, "Error", f"Connection error: {str(e)}")
+            error_msg = (
+                f"Connection error: {str(e)}\n\n"
+                "This usually indicates a network connectivity issue.\n"
+                "Please check your network connection and try again."
+            )
+            QMessageBox.critical(self, "Network Error", error_msg)
             self.show_connection_dialog()
     
     async def handle_auth_success(self, client_id: str, data: Dict[str, Any]):
