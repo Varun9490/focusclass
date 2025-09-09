@@ -668,7 +668,7 @@ class NetworkManager:
         
         disconnected_clients = []
         
-        for client_id, connection_info in self.connections.items():
+        for client_id, connection_info in list(self.connections.items()):
             if client_id not in exclude:
                 try:
                     websocket = connection_info.get('websocket') if isinstance(connection_info, dict) else connection_info
