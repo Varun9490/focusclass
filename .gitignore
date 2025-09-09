@@ -1,0 +1,61 @@
+# Python bytecode and cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environment
+.venv/
+env/
+venv/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+*.manifest
+*.spec
+
+# Executables
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Logs and databases
+logs/
+*.log
+*.db
+
+# Temporary / cache files
+*.tmp
+*.temp
+*.swp
+*.bak
+*.cache
+*.DS_Store
+Thumbs.db
+
+# PyInstaller artifacts
+*.toc
+*.pkg
+*.pyz
+*.zip
+
+# Installer scripts output
+install.bat
+installer.nsi
+
+# Test & coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# IDE / Editor configs
+.vscode/
+.idea/
+
+# Project-specific
+assets/
+exports/

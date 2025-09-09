@@ -1,0 +1,33 @@
+# Core GUI Framework
+PyQt5>=5.15.0
+qasync>=0.23.0
+
+# Screen Capture (Essential)
+mss>=9.0.0
+Pillow>=10.0.0
+
+# Database (Essential)
+aiosqlite>=0.19.0
+
+# QR Code Generation (Essential)
+qrcode[pil]>=7.4.0
+
+# Basic Networking (Essential)
+websockets>=11.0.0
+aiohttp>=3.8.0
+
+# Windows System Integration (Essential)
+psutil>=5.9.0
+pywin32>=306; sys_platform == "win32"
+
+# Optional Advanced Features (install separately if needed)
+# aiortc>=1.6.0  # For WebRTC video streaming
+# av>=10.0.0     # For advanced video processing
+# opencv-python>=4.8.0  # For video processing
+# numpy>=1.24.0  # For array operations
+# zeroconf>=0.112.0  # For network discovery
+# pyautogui>=0.9.0  # For automation
+# cryptography>=41.0.0  # For security
+
+# Development Tools
+PyInstaller>=6.1.0
