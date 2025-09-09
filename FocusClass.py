@@ -58,8 +58,8 @@ def run_as_admin():
             return False
         except:
             QMessageBox.critical(None, "Admin Required", 
-                               "Administrator privileges are required to run FocusClass.\n"
-                               "Please run as administrator.")
+                                 "Administrator privileges are required to run FocusClass.\n"
+                                 "Please run as administrator.")
             return False
     return True
 
@@ -395,12 +395,86 @@ class WelcomeWindow(QMainWindow):
         
         main_layout.addLayout(footer_layout)
     
+    # --- Start of Fix ---
+    def create_mode_container(self, icon, title, description, color, callback):
+        """Creates a styled container for a mode selection"""
+        container = QFrame()
+        container.setObjectName("featureFrame")
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(25, 20, 25, 20)
+        layout.setSpacing(20)
+
+        # Text part
+        text_layout = QVBoxLayout()
+        text_layout.setSpacing(5)
+        
+        title_label = QLabel(f"{icon} {title}")
+        title_label.setFont(QFont("Segoe UI", 16, QFont.Bold))
+        title_label.setStyleSheet("color: #2c3e50; background: transparent;")
+        text_layout.addWidget(title_label)
+        
+        desc_label = QLabel(description)
+        desc_label.setFont(QFont("Segoe UI", 10))
+        desc_label.setStyleSheet("color: #5a6c7d; background: transparent;")
+        desc_label.setWordWrap(True)
+        text_layout.addWidget(desc_label)
+        
+        layout.addLayout(text_layout, 3) 
+
+        # Button part
+        button = ModernButton(f"Launch {title.split(' ')[0]}", color_scheme=color)
+        button.clicked.connect(callback)
+        button.setMinimumSize(200, 60)
+        button.setMaximumSize(220, 70)
+        
+        layout.addWidget(button, 1, Qt.AlignCenter)
+        
+        return container
+        
+    def create_footer_button(self, icon, text, color, callback):
+        """Creates a styled button for the footer"""
+        button = QPushButton(f"{icon} {text}")
+        button.setFont(QFont("Segoe UI", 10, QFont.Bold))
+        button.setCursor(Qt.PointingHandCursor)
+        button.setStyleSheet(f"""
+            QPushButton {{
+                color: {color};
+                background-color: transparent;
+                border: none;
+                padding: 5px 10px;
+            }}
+            QPushButton:hover {{
+                background-color: rgba(0, 0, 0, 0.05);
+                border-radius: 8px;
+            }}
+            QPushButton:pressed {{
+                background-color: rgba(0, 0, 0, 0.1);
+            }}
+        """)
+        button.clicked.connect(callback)
+        return button
+
+    def show_about(self):
+        """Show about dialog"""
+        about_text = f"""
+        <h2>🎓 {APP_NAME} v{APP_VERSION}</h2>
+        <p><b>Professional Classroom Management System</b></p>
+        <p>© 2025 FocusClass Team. All rights reserved.</p>
+        <p>This application is designed to enhance the learning environment
+        by providing teachers with robust tools for classroom management and
+        student engagement.</p>
+        <p>For more information, visit our website:
+        <a href='https://focusclass.app'>focusclass.app</a></p>
+        """
+        QMessageBox.about(self, f"About {APP_NAME}", about_text)
+    # --- End of Fix ---
+        
     def show_settings(self):
         """Show settings dialog"""
         QMessageBox.information(self, "Settings", 
-                              "Settings panel coming soon!\n\n"
-                              "Current configuration can be found in:\n"
-                              "src/common/config.py")
+                                "Settings panel coming soon!\n\n"
+                                "Current configuration can be found in:\n"
+                                "src/common/config.py")
     
     def show_help(self):
         """Show help dialog"""
@@ -449,7 +523,7 @@ class WelcomeWindow(QMainWindow):
         """Launch teacher application"""
         if not is_admin():
             QMessageBox.warning(self, "Admin Required", 
-                              "Teacher mode requires administrator privileges for full functionality.")
+                                "Teacher mode requires administrator privileges for full functionality.")
             return
             
         try:
@@ -474,8 +548,8 @@ class WelcomeWindow(QMainWindow):
                 
             except ImportError as e2:
                 QMessageBox.critical(self, "Error", 
-                                   f"Failed to launch teacher application:\n{str(e2)}\n\n"
-                                   "Please ensure all dependencies are installed.")
+                                     f"Failed to launch teacher application:\n{str(e2)}\n\n"
+                                     "Please ensure all dependencies are installed.")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Unexpected error: {str(e)}")
             
@@ -503,8 +577,8 @@ class WelcomeWindow(QMainWindow):
                 
             except ImportError as e2:
                 QMessageBox.critical(self, "Error", 
-                                   f"Failed to launch student application:\n{str(e2)}\n\n"
-                                   "Please ensure all dependencies are installed.")
+                                     f"Failed to launch student application:\n{str(e2)}\n\n"
+                                     "Please ensure all dependencies are installed.")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Unexpected error: {str(e)}")
             
@@ -515,8 +589,8 @@ class WelcomeWindow(QMainWindow):
     def closeEvent(self, event):
         """Handle window close event"""
         reply = QMessageBox.question(self, "Exit FocusClass",
-                                   "Are you sure you want to exit FocusClass?",
-                                   QMessageBox.Yes | QMessageBox.No)
+                                     "Are you sure you want to exit FocusClass?",
+                                     QMessageBox.Yes | QMessageBox.No)
         
         if reply == QMessageBox.Yes:
             event.accept()
@@ -646,8 +720,8 @@ def main():
     except Exception as e:
         logger.error(f"Application error: {e}")
         QMessageBox.critical(None, "Application Error", 
-                           f"An unexpected error occurred:\n{str(e)}\n\n"
-                           "Please check the logs for more details.")
+                             f"An unexpected error occurred:\n{str(e)}\n\n"
+                             "Please check the logs for more details.")
     finally:
         logger.info("Application shutdown")
 
